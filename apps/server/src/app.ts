@@ -17,6 +17,12 @@ function selectionIds(value: unknown): number[] | null {
   return new Set(valid).size === valid.length ? valid : null;
 }
 
+const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+function isLoopbackUrl(value: string): boolean {
+  try { return LOOPBACK_HOSTNAMES.has(new URL(value).hostname); } catch { return false; }
+}
+
 export function createApp(options: { store: Store; token?: string; transport?: HttpTransport;
   sleep?: (milliseconds: number) => Promise<void>; mode?: "live" | "mock" }) {
   const app = Fastify({ logger: false, bodyLimit: 64 * 1024 });
@@ -30,6 +36,19 @@ export function createApp(options: { store: Store; token?: string; transport?: H
     reply.code(statusCode).send({ error: statusCode < 500 ? "invalid_request" : "internal_error" });
   });
   app.addHook("onClose", async () => { await activeCollection; });
+
+  // Binding to 127.0.0.1 does not stop the analyst's own browser from being used against this API. A foreign
+  // Host header means DNS rebinding (a page reading evidence through its own domain); a foreign Origin on a
+  // state-changing request means a cross-site form or fetch (e.g. starting collections). Both are refused.
+  app.addHook("onRequest", async (request, reply) => {
+    if (!isLoopbackUrl(`http://${request.headers.host ?? ""}`)) {
+      return reply.code(403).send({ error: "forbidden_host" });
+    }
+    const origin = request.headers.origin;
+    if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && origin !== undefined && !isLoopbackUrl(origin)) {
+      return reply.code(403).send({ error: "forbidden_origin" });
+    }
+  });
 
   app.get("/api/health", async () => ({ status: "ok", gitlabConfigured: Boolean(options.token), mode: options.mode ?? "live" }));
   app.get("/api/selection", async () => ({ projectIds: store.getSelection() }));

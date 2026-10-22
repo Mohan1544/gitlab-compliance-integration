@@ -63,12 +63,19 @@ describe("evidence comparison", () => {
     ]);
   });
 
-  it("keeps an omitted provider field distinct from an explicit false", () => {
+  it("treats a rule field GitLab stopped (or started) returning as not compared, never as a changed setting", () => {
     const before = protectedMain([mainRule()]);
-    const after = protectedMain([mainRule({ codeOwnerApprovalRequired: undefined })]);
-    expect(compareEvidence(before, after).changes).toEqual([
-      { field: "code_owner_approval_required", rule: "main (exact)", before: false, after: undefined },
-    ]);
+    const after = protectedMain([mainRule({ codeOwnerApprovalRequired: undefined, allowForcePush: true })]);
+    expect(compareEvidence(before, after)).toEqual({
+      changes: [{ field: "allow_force_push", rule: "main (exact)", before: false, after: true }],
+      notCompared: ["code_owner_approval_required (rule main (exact))"],
+    });
+    expect(compareEvidence(after, before)).toEqual({
+      changes: [{ field: "allow_force_push", rule: "main (exact)", before: true, after: false }],
+      notCompared: ["code_owner_approval_required (rule main (exact))"],
+    });
+    const omittedBoth = protectedMain([mainRule({ unprotectAccessLevels: undefined })]);
+    expect(compareEvidence(omittedBoth, omittedBoth)).toEqual({ changes: [], notCompared: [] });
   });
 
   it("compares only observed facts when the current evidence is partial", () => {

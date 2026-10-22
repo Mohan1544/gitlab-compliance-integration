@@ -20,7 +20,7 @@ export class Collector {
         try {
           await this.collectProject(runId, projectId);
         } catch {
-          this.store.finishProject(runId, projectId, "failed", null, "unexpected_collection_error");
+          this.store.failProjectKeepingEvidence(runId, projectId, "unexpected_collection_error");
         }
       }
     });

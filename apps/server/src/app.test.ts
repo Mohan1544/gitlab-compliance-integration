@@ -211,6 +211,88 @@ describe("collection API", () => {
       notCompared: ["protection_rules"] });
   });
 
+  it("refuses foreign Host headers and cross-site state changes, and allows the local UI", async () => {
+    const store = new Store(":memory:");
+    cleanup.push(() => store.close());
+    store.saveSelection([1]);
+    const app = createApp({ store, token: "mock-token", transport: transport(), sleep: async () => {} });
+    cleanup.push(() => app.close());
+
+    // DNS rebinding: a page on attacker.example resolving to 127.0.0.1 sends its own hostname.
+    const rebound = await app.inject({ method: "GET", url: "/api/selection", headers: { host: "attacker.example:3001" } });
+    expect(rebound.statusCode).toBe(403);
+    expect(rebound.json()).toEqual({ error: "forbidden_host" });
+    expect(rebound.body).not.toContain("projectIds");
+
+    // Cross-site form or fetch from another site: no run may start and the selection must not change.
+    for (const origin of ["https://attacker.example", "null"]) {
+      const crossSite = await app.inject({ method: "POST", url: "/api/runs", headers: { host: "127.0.0.1:3001", origin, "content-type": "text/plain" } });
+      expect(crossSite.statusCode).toBe(403);
+      expect(crossSite.json()).toEqual({ error: "forbidden_origin" });
+    }
+    const crossSiteSave = await app.inject({ method: "PUT", url: "/api/selection", headers: { host: "127.0.0.1:3001", origin: "https://attacker.example" }, payload: { projectIds: [2] } });
+    expect(crossSiteSave.statusCode).toBe(403);
+    expect(store.listRuns()).toEqual([]);
+    expect(store.getSelection()).toEqual([1]);
+
+    // The local UI through the Vite proxy (loopback Host and Origin, any port) keeps working.
+    for (const host of ["127.0.0.1:5173", "localhost:3001", "[::1]:5173"]) {
+      expect((await app.inject({ method: "GET", url: "/api/health", headers: { host } })).statusCode).toBe(200);
+    }
+    const local = await app.inject({ method: "PUT", url: "/api/selection", headers: { host: "127.0.0.1:5173", origin: "http://127.0.0.1:5173" }, payload: { projectIds: [3] } });
+    expect(local.statusCode).toBe(200);
+    expect(store.getSelection()).toEqual([3]);
+  });
+
+  it("does not let a second server interrupt a run owned by a live server", () => {
+    const directory = mkdtempSync(join(tmpdir(), "gitlab-evidence-"));
+    cleanup.push(() => rmSync(directory, { recursive: true, force: true }));
+    const path = join(directory, "evidence.sqlite");
+    const first = new Store(path);
+    cleanup.push(() => first.close());
+    expect(first.recoverOnStartup("first", 1111, () => true)).toEqual({ acquired: true });
+    const run = first.createRun([17]);
+    first.markRunRunning(run.id);
+    first.markProjectRunning(run.id, 17);
+
+    const second = new Store(path);
+    cleanup.push(() => second.close());
+    expect(second.recoverOnStartup("second", 2222, (pid) => pid === 1111)).toEqual({ acquired: false, holderPid: 1111 });
+    expect(second.getRun(run.id)?.state).toBe("running");
+    expect(second.getRun(run.id)?.projects?.[0]?.state).toBe("running");
+    expect(first.renewLease("first")).toBe(true);
+
+    // Once the owner's process is gone, the next server takes over and recovers its abandoned run.
+    expect(second.recoverOnStartup("second", 2222, () => false)).toEqual({ acquired: true });
+    expect(second.getRun(run.id)?.state).toBe("interrupted");
+    expect(first.renewLease("first")).toBe(false);
+  });
+
+  it("takes over a lease that has expired even if its process id is still in use", () => {
+    const store = new Store(":memory:");
+    cleanup.push(() => store.close());
+    expect(store.recoverOnStartup("hung", 1111, () => true)).toEqual({ acquired: true });
+    expect(store.recoverOnStartup("next", 2222, () => true, 0)).toEqual({ acquired: true });
+    expect(store.renewLease("hung")).toBe(false);
+  });
+
+  it("upgrades a version 1 database to version 2 without losing data", () => {
+    const directory = mkdtempSync(join(tmpdir(), "gitlab-evidence-"));
+    cleanup.push(() => rmSync(directory, { recursive: true, force: true }));
+    const path = join(directory, "evidence.sqlite");
+    let store = new Store(path);
+    store.saveSelection([5, 6]);
+    const run = store.createRun([5]);
+    store.db.exec("DROP TABLE server_lease; PRAGMA user_version = 1;");
+    store.close();
+    store = new Store(path);
+    cleanup.push(() => store.close());
+    expect((store.db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(2);
+    expect(store.getSelection()).toEqual([5, 6]);
+    expect(store.getRun(run.id)?.requestedProjectIds).toEqual([5]);
+    expect(store.recoverOnStartup("owner", 1, () => true)).toEqual({ acquired: true });
+  });
+
   it("persists selection and marks unfinished work interrupted after restart", () => {
     const directory = mkdtempSync(join(tmpdir(), "gitlab-evidence-"));
     cleanup.push(() => rmSync(directory, { recursive: true, force: true }));

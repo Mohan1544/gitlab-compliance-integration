@@ -169,6 +169,38 @@ test.describe.serial("analyst collection flow", () => {
     await expect(page.getByTestId("project-999").locator("header .badge")).toHaveText("failed");
     await expect(page.getByTestId("project-999").getByText("Latest attempt: not found or inaccessible.", { exact: false })).toBeVisible();
   });
+
+  // Review finding: a slow refresh that started before the analyst picked another run must not switch the view back.
+  test("a delayed refresh cannot override the run the analyst selected", async ({ page }) => {
+    await page.goto("/");
+    await saveIds(page, "101, 102, 103");
+    // Run details for every run except run 1 arrive 1.5 s late, so refreshes started before the click land after it.
+    await page.route(/\/api\/runs\/\d+(\/changes)?$/, async (route) => {
+      if (!/\/api\/runs\/1(\/changes)?$/.test(new URL(route.request().url()).pathname)) {
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 1500));
+      }
+      await route.continue();
+    });
+    const started = page.waitForResponse((response) => response.url().endsWith("/api/runs") && response.request().method() === "POST");
+    await page.getByRole("button", { name: "Start collection" }).click();
+    expect((await started).status()).toBe(202);
+
+    await page.evaluate(() => {
+      const heading = document.getElementById("run-title")!;
+      const seen: string[] = [];
+      (window as unknown as { seenHeadings: string[] }).seenHeadings = seen;
+      new MutationObserver(() => seen.push(heading.textContent ?? "")).observe(heading, { childList: true, characterData: true, subtree: true });
+    });
+    await page.getByRole("button", { name: /^Run 1\b/ }).click();
+    await expect(page.getByRole("heading", { name: "Run 1", exact: true })).toBeVisible();
+    await page.waitForTimeout(4000);
+    const seen = await page.evaluate(() => (window as unknown as { seenHeadings: string[] }).seenHeadings);
+    expect(seen.length).toBeGreaterThan(0);
+    expect(new Set(seen)).toEqual(new Set(["Run 1"]));
+
+    await page.unroute(/\/api\/runs\/\d+(\/changes)?$/);
+    await expect.poll(async () => (await (await page.request.get("/api/runs/active")).json()).run, { timeout: 30_000 }).toBeNull();
+  });
 });
 
 // MANUAL_TESTING.md scenario 9, plus an abrupt stop mid-run. This test owns its API and UI processes so it can

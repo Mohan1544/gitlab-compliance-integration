@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Comparison, type Evidence, type Run, type RunProject } from "./api";
 
 const activeStates = new Set(["queued", "running"]);
@@ -179,25 +179,35 @@ export default function App() {
   const [mode, setMode] = useState<"live" | "mock">("live");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // The run the analyst asked to see, updated synchronously on click, and a counter that orders refreshes.
+  // A refresh only applies its result if no newer refresh has started, so a slow poll that began before the
+  // analyst picked another run can never switch the view back.
+  const viewedRunId = useRef<number | null>(null);
+  const latestRefresh = useRef(0);
 
   const refresh = useCallback(async (runId?: number | null) => {
+    const request = ++latestRefresh.current;
+    if (runId != null) viewedRunId.current = runId;
     const [selection, runs, active, health] = await Promise.all([
       api<{ projectIds: number[] }>("/api/selection"),
       api<{ runs: Run[] }>("/api/runs"),
       api<{ run: Run | null }>("/api/runs/active"),
       api<{ gitlabConfigured: boolean; mode: "live" | "mock" }>("/api/health"),
     ]);
+    if (request !== latestRefresh.current) return;
     setSavedIds(selection.projectIds);
     setIdsInput((previous) => previous || selection.projectIds.join(", "));
     setHistory(runs.runs);
     setConfigured(health.gitlabConfigured);
     setMode(health.mode);
-    const chosen = runId ?? active.run?.id ?? runs.runs[0]?.id ?? null;
+    const chosen = viewedRunId.current ?? active.run?.id ?? runs.runs[0]?.id ?? null;
     if (chosen !== null) {
       const [detail, changes] = await Promise.all([
         api<Run>(`/api/runs/${chosen}`),
         api<{ comparisons: Comparison[] }>(`/api/runs/${chosen}/changes`),
       ]);
+      if (request !== latestRefresh.current) return;
+      viewedRunId.current = chosen;
       setSelectedRunId(chosen);
       setRun(detail);
       setComparisons(changes.comparisons);
@@ -212,9 +222,16 @@ export default function App() {
   useEffect(() => { void refresh().catch((reason: Error) => setError(reason.message)); }, [refresh]);
   useEffect(() => {
     if (!polling) return;
-    const timer = window.setInterval(() => { void refresh(selectedRunId).catch((reason: Error) => setError(reason.message)); }, 1000);
+    // Skip a tick while the previous poll is still in flight; otherwise slow responses would keep superseding
+    // each other and the view would never update. Analyst actions still supersede an in-flight poll.
+    let pollInFlight = false;
+    const timer = window.setInterval(() => {
+      if (pollInFlight) return;
+      pollInFlight = true;
+      void refresh().catch((reason: Error) => setError(reason.message)).finally(() => { pollInFlight = false; });
+    }, 1000);
     return () => window.clearInterval(timer);
-  }, [polling, selectedRunId, refresh]);
+  }, [polling, refresh]);
 
   async function saveSelection() {
     setError("");

@@ -37,6 +37,42 @@ async function collect(projectId: number, routes: Record<string, HttpResponse | 
 const base = "/api/v4/projects/1";
 
 describe("collector", () => {
+  it("keeps checkpointed evidence when an unexpected error stops a project", async () => {
+    // A storage failure while recording the rules read stands in for any unexpected error after some facts were saved.
+    class FailingStore extends Store {
+      override recordRead(read: Parameters<Store["recordRead"]>[0]): void {
+        if (read.source === "protected_branches") throw new Error("disk full");
+        super.recordRead(read);
+      }
+    }
+    const store = new FailingStore(":memory:");
+    stores.push(store);
+    const transport: HttpTransport = { async send(url) {
+      const path = `${url.pathname}${url.search}`;
+      if (path === base) return ok(project(1));
+      if (path === `${base}/repository/branches/main`) return ok({ name: "main", protected: true });
+      return ok([rule("main")]);
+    } };
+    const run = store.createRun([1]);
+    await new Collector(store, new GitLabClient("mock-token", transport, store, async () => {})).execute(run.id);
+    const outcome = store.getRun(run.id)!.projects![0]!;
+    expect(outcome).toMatchObject({ state: "partial", errorCode: "unexpected_collection_error" });
+    expect(outcome.evidence?.branch).toEqual({ name: "main", protected: true });
+    expect(outcome.evidence?.classification).toBe("protected");
+    expect(store.getRun(run.id)?.state).toBe("partial");
+  });
+
+  it("fails a project with no evidence when an unexpected error happens before anything is saved", async () => {
+    class FailingStore extends Store {
+      override recordRead(): void { throw new Error("disk full"); }
+    }
+    const store = new FailingStore(":memory:");
+    stores.push(store);
+    const run = store.createRun([1]);
+    await new Collector(store, new GitLabClient("mock-token", { async send() { return ok(project(1)); } }, store, async () => {})).execute(run.id);
+    expect(store.getRun(run.id)!.projects![0]).toMatchObject({ state: "failed", errorCode: "unexpected_collection_error", evidence: null });
+  });
+
   it("follows Link pagination across protected-branch pages and keeps every page's provenance", async () => {
     const { project: outcome } = await collect(1, {
       [base]: ok(project(1)),
