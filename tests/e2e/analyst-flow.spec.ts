@@ -1,4 +1,41 @@
-import { expect, test } from "@playwright/test";
+import { spawn, type ChildProcess } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { expect, test, type Page } from "@playwright/test";
+
+const ID_RULE = "Enter 1–20 unique positive numeric project IDs, separated by commas or spaces.";
+
+async function saveIds(page: Page, ids: string) {
+  await page.getByRole("textbox", { name: "Numeric GitLab project IDs" }).fill(ids);
+  await page.getByRole("button", { name: "Save selection" }).click();
+  await expect(page.getByText(`Saved: ${ids}.`, { exact: false })).toBeVisible();
+}
+
+async function collect(page: Page, expected: string) {
+  await page.getByRole("button", { name: "Start collection" }).click();
+  await expect(page.getByTestId("run-state")).toHaveText(/queued|running/);
+  await expect(page.getByTestId("run-state")).toHaveText(expected, { timeout: 30_000 });
+}
+
+// Starts a process and waits until `readyUrl` answers, for tests that must stop and restart the API.
+async function startProcess(args: string[], env: Record<string, string>, readyUrl: string): Promise<ChildProcess> {
+  const child = spawn(process.execPath, args, { env: { ...process.env, ...env }, stdio: "ignore" });
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    try { if ((await fetch(readyUrl)).ok) return child; } catch { /* not listening yet */ }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+  }
+  child.kill("SIGKILL");
+  throw new Error(`Process did not become ready: ${readyUrl}`);
+}
+
+// Kills a process abruptly and waits for it to exit, so its open files (e.g. SQLite) are released.
+async function killAndWait(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise<void>((resolveExit) => child.once("exit", () => resolveExit()));
+  child.kill("SIGKILL");
+  await Promise.race([exited, new Promise<void>((resolveWait) => setTimeout(resolveWait, 10_000))]);
+}
 
 // The mock API delays every GitLab response (MOCK_GITLAB_DELAY_MS in playwright.config.ts), so each run
 // stays active long enough to refresh the browser mid-collection.
@@ -88,4 +125,94 @@ test.describe.serial("analyst collection flow", () => {
     const original = await page.request.get("/api/runs/1");
     expect((await original.json()).requestedProjectIds).toEqual([101, 102, 103]);
   });
+
+  // MANUAL_TESTING.md scenario 1
+  test("rejects invalid or duplicate IDs without changing the saved selection or creating a run", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByText("Saved: 101.", { exact: false })).toBeVisible();
+    const runsBefore = (await (await page.request.get("/api/runs")).json()).runs.length;
+    for (const invalid of ["abc", "101, 101", "", "-1"]) {
+      await page.getByRole("textbox", { name: "Numeric GitLab project IDs" }).fill(invalid);
+      await page.getByRole("button", { name: "Save selection" }).click();
+      await expect(page.getByRole("alert")).toHaveText(ID_RULE);
+      await expect(page.getByText("Saved: 101.", { exact: false })).toBeVisible();
+    }
+    expect((await (await page.request.get("/api/selection")).json()).projectIds).toEqual([101]);
+    expect((await (await page.request.get("/api/runs")).json()).runs).toHaveLength(runsBefore);
+  });
+
+  // MANUAL_TESTING.md scenario 5
+  test("a project that cannot be read fails with 404 guidance and no retries", async ({ page }) => {
+    await page.goto("/");
+    await saveIds(page, "999");
+    await collect(page, "failed");
+    const card = page.getByTestId("project-999");
+    await expect(card.getByText("Latest attempt: not found or inaccessible.", { exact: false })).toBeVisible();
+    await expect(card.getByText("GitLab may return 404 for either condition", { exact: false })).toBeVisible();
+    await expect(card.getByText("No evidence was collected for this project in this run.")).toBeVisible();
+    await expect(card.getByText("No earlier complete evidence exists for this project.")).toBeVisible();
+    await card.getByText("Source reads and provenance").click();
+    const read = card.locator(".source-list li").first();
+    await expect(read).toContainText("HTTP 404");
+    await expect(read).not.toContainText("attempts");
+    await expect(page.getByRole("button", { name: /^Run 1\b/ })).toBeVisible();
+  });
+
+  // MANUAL_TESTING.md scenario 6
+  test("a run with one readable and one unreadable project is partial and keeps both outcomes", async ({ page }) => {
+    await page.goto("/");
+    await saveIds(page, "102, 999");
+    await collect(page, "partial");
+    await expect(page.locator(".project-card")).toHaveCount(2);
+    await expect(page.getByTestId("project-102").locator("header .badge")).toHaveText("complete");
+    await expect(page.getByTestId("project-102").getByText("Unprotected", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("project-999").locator("header .badge")).toHaveText("failed");
+    await expect(page.getByTestId("project-999").getByText("Latest attempt: not found or inaccessible.", { exact: false })).toBeVisible();
+  });
+});
+
+// MANUAL_TESTING.md scenario 9, plus an abrupt stop mid-run. This test owns its API and UI processes so it can
+// restart the API; it uses separate ports and a fresh database.
+test("a restart keeps selection and history, and a run stopped mid-collection becomes interrupted", async ({ page }) => {
+  test.setTimeout(120_000);
+  const apiPort = 3111;
+  const webPort = 5281;
+  const dataDir = mkdtempSync(join(tmpdir(), "zania-restart-test-"));
+  const apiEnv = { MOCK_GITLAB_SCENARIO: "partial-recovery", MOCK_GITLAB_DELAY_MS: "600", DATA_DIR: dataDir, SERVER_PORT: String(apiPort) };
+  const startApi = () => startProcess([resolve("apps/server/dist/main.js")], apiEnv, `http://127.0.0.1:${apiPort}/api/health`);
+  let api = await startApi();
+  const web = await startProcess([resolve("node_modules/vite/bin/vite.js"), "apps/web", "--host", "127.0.0.1", "--port", String(webPort),
+    "--strictPort", "--config", "apps/web/vite.config.ts"], { API_PROXY_TARGET: `http://127.0.0.1:${apiPort}` }, `http://127.0.0.1:${webPort}/`);
+  try {
+    await page.goto(`http://127.0.0.1:${webPort}/`);
+    await collect(page, "completed");
+
+    // Scenario 9: stop and restart the API; the saved selection and completed run survive.
+    await killAndWait(api);
+    api = await startApi();
+    await page.reload();
+    await expect(page.getByText("Saved: 101, 102, 103.", { exact: false })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Run 1", exact: true })).toBeVisible();
+    await expect(page.getByTestId("run-state")).toHaveText("completed");
+
+    // Abrupt stop while run 2 is collecting: after restart it is interrupted, not running forever.
+    await page.getByRole("button", { name: "Start collection" }).click();
+    await expect(page.getByTestId("run-state")).toHaveText("running");
+    await killAndWait(api);
+    api = await startApi();
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Run 2", exact: true })).toBeVisible();
+    await expect(page.getByTestId("run-state")).toHaveText("interrupted");
+    await expect(page.getByText("Latest attempt: server interrupted. The server stopped during collection; start a new run.").first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Start collection" })).toBeEnabled();
+
+    // Recovery: a new run can start and complete.
+    await collect(page, "completed");
+    await expect(page.getByRole("heading", { name: "Run 3", exact: true })).toBeVisible();
+  } finally {
+    await killAndWait(api);
+    await killAndWait(web);
+    // Best-effort: Windows can hold file locks briefly after exit; a leftover temp folder must not fail the test.
+    try { rmSync(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch { /* ignored */ }
+  }
 });

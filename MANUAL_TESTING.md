@@ -6,6 +6,23 @@ Use this guide to understand the messages and check the application yourself. Th
 
 On October 22, 2026, the candidate reported completing the manual scenarios in this guide successfully. This records the candidate's manual testing report; the scenario checkboxes below remain a reusable checklist for future sessions. The separate live GitLab setting-change demonstration was completed the same day (runs 6–10); see [Live demonstration evidence](README.md#live-demonstration-evidence).
 
+## Automated and recorded coverage
+
+Every scenario below also has an automated browser test in [tests/e2e/analyst-flow.spec.ts](tests/e2e/analyst-flow.spec.ts) that runs the real backend with mocked GitLab HTTP, and appears in the [mock demo video](https://mohan1544.github.io/gitlab-compliance-integration/demo/) ([download](docs/demo/mock/mock-demo.webm)).
+
+| # | Scenario | Automated browser test | Video | Screenshot |
+| --- | --- | --- | --- | --- |
+| 1 | Invalid input and duplicate IDs | *rejects invalid or duplicate IDs without changing the saved selection or creating a run* | Part 2 | [mock-10](docs/demo/mock/mock-10-invalid-input.png) |
+| 2 | First collection: successful baseline | *successful collection reconnects after a mid-run refresh…* | Part 1 | [mock-04](docs/demo/mock/mock-04-run1-complete.png) |
+| 3 | Partial failure with older evidence | *partial failure preserves last-good evidence…* | Part 1 | [mock-06](docs/demo/mock/mock-06-run2-partial-project-card.png), [mock-07](docs/demo/mock/mock-07-run2-partial-comparison.png) |
+| 4 | Recovery and a setting change | *partial failure preserves last-good evidence and recovery compares to the first complete run* | Part 1 | [mock-08](docs/demo/mock/mock-08-run3-recovery-comparison.png) |
+| 5 | Total collection failure (`999`) | *a project that cannot be read fails with 404 guidance and no retries* | Part 2 | [mock-11](docs/demo/mock/mock-11-total-failure-card.png) |
+| 6 | One good project and one failed project | *a run with one readable and one unreadable project is partial and keeps both outcomes* | Part 2 | [mock-12](docs/demo/mock/mock-12-mixed-run.png) |
+| 7 | Unsaved selection and preserved history | *requires saving edited IDs and preserves the original selection of earlier runs* | Part 2 | [mock-13](docs/demo/mock/mock-13-unsaved-selection.png), [mock-14](docs/demo/mock/mock-14-history-preserved.png) |
+| 8 | Refresh while collection is running | *successful collection reconnects after a mid-run refresh…* | Part 1 | [mock-03](docs/demo/mock/mock-03-run1-reconnected-after-refresh.png) |
+| 9 | Stop and restart without losing history | *a restart keeps selection and history, and a run stopped mid-collection becomes interrupted* | Part 2 | [mock-15](docs/demo/mock/mock-15-after-restart.png) |
+| — | Abrupt stop mid-run (see below) | Same test as scenario 9 | Part 2 | [mock-16](docs/demo/mock/mock-16-interrupted-run.png) |
+
 ## Start a separate test session
 
 1. Leave the frontend running in its terminal (`npm run dev:web`).
@@ -141,7 +158,7 @@ Record: [ ] Pass [ ] Issue found
 
 ## Tests that require a different setup
 
-- **Abrupt backend interruption:** automatic tests cover converting unfinished work to `interrupted` on restart. Normal Ctrl+C is graceful shutdown and may finish the active run, so do not expect it to produce an interrupted outcome.
+- **Abrupt backend interruption:** normal Ctrl+C is a graceful shutdown and may finish the active run, so it does not produce an interrupted outcome. The browser test for scenario 9 kills the API process mid-run instead, restarts it, and checks the run is marked `interrupted` with its observed evidence kept; Part 2 of the mock video shows the same.
 - **401, 403, 429, timeout and malformed provider response:** automated tests cover these at the GitLab boundary. The current manual mock mode does not offer selectors for them. Do not edit or revoke the real token just to manufacture these failures.
 - **Real GitLab setting change:** perform this later in live mode, following the seed guide. The mock change above is simulated and is not a substitute for the required live demonstration.
 

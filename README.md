@@ -2,7 +2,7 @@
 
 A local, read-only tool for a compliance analyst to collect GitLab.com branch-protection evidence, investigate collection failures, and understand how a project's protection posture changes between collections.
 
-**Status:** implemented and verified. 42 server tests and 4 browser tests pass on Node.js 24.19.0. A live two-collection demonstration against real GitLab.com projects is recorded under [Live demonstration](#live-demonstration-evidence).
+**Status:** implemented and verified. 42 server tests and 8 browser tests pass on Node.js 24.19.0. A live two-collection demonstration against real GitLab.com projects is recorded under [Live demonstration](#live-demonstration-evidence).
 
 ▶ **[Watch the demo videos](https://mohan1544.github.io/gitlab-compliance-integration/demo/)** (mocked partial failure and recovery, and the live GitLab.com change), playable in the browser. GitHub's file view downloads `.webm` files rather than playing them, so the videos are served through GitHub Pages.
 
@@ -72,7 +72,7 @@ In a second terminal, run `npm run dev:web` and open http://127.0.0.1:5173. Mock
 
 The scenario repeats every three runs and is keyed to the stored run ID, so a server restart does not reset it. Delete `data/mock-demo` to start again from run 1.
 
-**Recording:** [watch it in the browser](https://mohan1544.github.io/gitlab-compliance-integration/demo/) (48 s, captioned), or download [mock-demo.webm](docs/demo/mock/mock-demo.webm). Locally, [docs/demo/index.html](docs/demo/index.html) plays every demo video on one page. It shows all three runs, including the mid-run refresh. Screenshots:
+**Recording:** [watch it in the browser](https://mohan1544.github.io/gitlab-compliance-integration/demo/) (2 min 22 s, captioned), or download [mock-demo.webm](docs/demo/mock/mock-demo.webm). Locally, [docs/demo/index.html](docs/demo/index.html) plays every demo video on one page. **Part 1** shows the three runs above, including the mid-run refresh. **Part 2** shows the other scenarios from [MANUAL_TESTING.md](MANUAL_TESTING.md): invalid input, total failure, a mixed run, unsaved selection, a server restart, and an abrupt stop mid-run. Screenshots:
 
 | Step | Screenshot |
 | --- | --- |
@@ -82,15 +82,24 @@ The scenario repeats every three runs and is keyed to the stored run ID, so a se
 | Run 1 complete: protected, unprotected, empty | [mock-04-run1-complete.png](docs/demo/mock/mock-04-run1-complete.png) |
 | Run 2 partial failure | [mock-05-run2-partial-failure.png](docs/demo/mock/mock-05-run2-partial-failure.png), [project card](docs/demo/mock/mock-06-run2-partial-project-card.png), [partial comparison](docs/demo/mock/mock-07-run2-partial-comparison.png) |
 | Run 3 recovery, compared with run 1 | [comparison](docs/demo/mock/mock-08-run3-recovery-comparison.png), [full page](docs/demo/mock/mock-09-run3-recovered.png) |
+| Invalid IDs rejected; saved selection unchanged | [mock-10-invalid-input.png](docs/demo/mock/mock-10-invalid-input.png) |
+| Total failure: project 999 returns 404 | [mock-11-total-failure-card.png](docs/demo/mock/mock-11-total-failure-card.png) |
+| Mixed run: 102 complete, 999 failed, run partial | [mock-12-mixed-run.png](docs/demo/mock/mock-12-mixed-run.png) |
+| Unsaved selection blocks Start | [mock-13-unsaved-selection.png](docs/demo/mock/mock-13-unsaved-selection.png) |
+| Run 1 keeps its original three projects | [mock-14-history-preserved.png](docs/demo/mock/mock-14-history-preserved.png) |
+| After a server restart, selection and history remain | [mock-15-after-restart.png](docs/demo/mock/mock-15-after-restart.png) |
+| Server killed mid-run: the run becomes interrupted | [mock-16-interrupted-run.png](docs/demo/mock/mock-16-interrupted-run.png) |
 
-![Run 2: partial failure with older evidence from run 1](docs/demo/mock/mock-06-run2-partial-project-card.png) [MANUAL_TESTING.md](MANUAL_TESTING.md) has further manual scenarios: total failure, mixed outcomes, unsaved selection, refresh, and restart.
+![Run 2: partial failure with older evidence from run 1](docs/demo/mock/mock-06-run2-partial-project-card.png)
+
+[MANUAL_TESTING.md](MANUAL_TESTING.md) lists each manual scenario with the automated test and the screenshot that cover it.
 
 ## Tests
 
 ```powershell
 npm test            # 42 server tests (Vitest), about 1 s
 npx playwright install chromium   # once: downloads Playwright's bundled Chromium
-npm run test:e2e    # builds, then 4 browser tests (Playwright), about 20 s
+npm run test:e2e    # builds, then 8 browser tests (Playwright), about 45 s
 ```
 
 To use an installed Google Chrome instead of the bundled Chromium, run `$env:PLAYWRIGHT_CHANNEL = "chrome"` before `npm run test:e2e`.
@@ -107,9 +116,9 @@ Tests target the places where a wrong answer looks like a right one: a failed re
 | Collection ([collector.test.ts](apps/server/src/collector.test.ts)) | `Link` pagination with provenance per page; a full page without pagination headers; page cap marked partial rather than silently truncated; wildcard-only protection; protected with no visible rule; branch 404 never classified as unprotected; default branch renamed between reads; `empty_repo` contradicted by branches; project 404 and ID mismatch; rules failure keeps the protected flag. | These are the honest-evidence rules: an unreadable setting is never a confirmed absence, and partial results are kept. |
 | Comparison ([comparison.test.ts](apps/server/src/comparison.test.ts)) | Access-entry order and display names ignored; field-level rule changes; wildcard rules that apply versus unrelated rules; applicable rule added or removed; omitted field versus explicit `false`; partial evidence compared only on observed facts; empty → initialized; visibility. | False positives erode trust in the change view; false negatives hide real posture changes. |
 | API and persistence ([app.test.ts](apps/server/src/app.test.ts)) | Collection of the three seed states; partial failure then recovery against the last complete baseline; one active run (409 naming the active run); start refused without selection or token; completed runs, requested IDs and reads survive a restart; evidence observed before a server stop is kept and compared as partial; interrupted runs never stay running. | Durable history and consistent execution under failure and repeated use. |
-| Browser ([analyst-flow.spec.ts](tests/e2e/analyst-flow.spec.ts)) | Successful collection with a mid-run refresh; partial failure with last-good evidence, partial comparison and recovery; stale-evidence and older-run labels (browser clock moved 8 days forward); unsaved selection blocks Start, and earlier runs keep their original IDs. | Exercises the real backend collector through the real UI with only GitLab HTTP mocked. |
+| Browser ([analyst-flow.spec.ts](tests/e2e/analyst-flow.spec.ts)) | Successful collection with a mid-run refresh; partial failure with last-good evidence, partial comparison and recovery; stale-evidence and older-run labels (browser clock moved 8 days forward); unsaved selection blocks Start, and earlier runs keep their original IDs; invalid or duplicate IDs rejected without creating a run; a 404 project fails with guidance and no retries; a mixed run is partial and keeps both outcomes; a server restart keeps selection and history, and a server killed mid-run comes back with that run marked interrupted. | Exercises the real backend collector through the real UI with only GitLab HTTP mocked. The restart test starts and stops its own API process to prove interrupted work never looks active. |
 
-The interrupted-run evidence test was checked by temporarily removing the code it protects and confirming it fails.
+The interrupted-run evidence test and the restart browser test were each checked by temporarily removing the code they protect and confirming they fail.
 
 ## Live demonstration evidence
 
@@ -235,7 +244,7 @@ Evidence JSON holds the project facts, the default branch and its protected flag
 AI coding assistants were used throughout, with every result checked by running it.
 
 - **OpenAI Codex** helped organize the assessment, research GitLab's documented APIs, write the planning and seed guides and the read-only verification script, implement the first version of the app, collector and tests, and later refine the UI (before/after cards, unsaved-selection guard) and the manual testing guide.
-- **Anthropic Claude Code** reviewed the implementation against the assessment PDF as an architect would, then implemented the fixes it found: wildcard rule matching and coverage warnings, field-level comparison that ignores display text, comparison of partial evidence on observed facts only, staleness labels, keeping evidence when a run is interrupted, the Node version check, the expanded test suite (5 → 42 server tests, plus the mid-run refresh browser test), and this README.
+- **Anthropic Claude Code** reviewed the implementation against the assessment PDF as an architect would, then implemented the fixes it found: wildcard rule matching and coverage warnings, field-level comparison that ignores display text, comparison of partial evidence on observed facts only, staleness labels, keeping evidence when a run is interrupted, the Node version check, the expanded test suite (5 → 42 server tests; browser tests for the mid-run refresh, every manual scenario, and a server killed mid-run), the demo recordings, and this README.
 
 **How the output was verified:**
 
