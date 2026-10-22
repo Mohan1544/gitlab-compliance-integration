@@ -62,7 +62,7 @@ test.describe.serial("analyst collection flow", () => {
 
     await page.reload();
     await expect(page.getByTestId("run-state")).toHaveText("completed");
-    await expect(page.getByText("First complete observation; no baseline yet.").first()).toBeVisible();
+    await expect(page.getByText("No earlier complete baseline is available.").first()).toBeVisible();
   });
 
   test("partial failure preserves last-good evidence and recovery compares to the first complete run", async ({ page }, testInfo) => {
@@ -200,6 +200,40 @@ test.describe.serial("analyst collection flow", () => {
 
     await page.unroute(/\/api\/runs\/\d+(\/changes)?$/);
     await expect.poll(async () => (await (await page.request.get("/api/runs/active")).json()).run, { timeout: 30_000 }).toBeNull();
+  });
+
+  // A refresh that read the selection before a save must not overwrite the saved selection when it lands late.
+  test("a delayed refresh cannot overwrite a selection saved after it started", async ({ page }) => {
+    // Every selection read that starts before the save returns the old selection 1.5 s late.
+    let saveSent = false;
+    const staleReads: Promise<void>[] = [];
+    await page.route(/\/api\/selection$/, async (route) => {
+      if (route.request().method() === "PUT") saveSent = true;
+      if (route.request().method() !== "GET" || saveSent) {
+        await route.continue();
+        return;
+      }
+      const delivered = (async () => {
+        const stale = await route.fetch();
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 1500));
+        await route.fulfill({ response: stale });
+      })();
+      staleReads.push(delivered);
+      await delivered;
+    });
+    await page.goto("/");
+    await page.getByRole("textbox", { name: "Numeric GitLab project IDs" }).fill("102");
+    await page.getByRole("button", { name: "Save selection" }).click();
+    expect(staleReads.length).toBeGreaterThan(0);
+    await Promise.all(staleReads);
+    await expect(page.getByText("Saved: 102.", { exact: false })).toBeVisible();
+    await page.waitForTimeout(500);
+    await expect(page.getByText("Saved: 102.", { exact: false })).toBeVisible();
+    await expect(page.getByText("You have unsaved changes.", { exact: false })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Start collection" })).toBeEnabled();
+    await expect(page.getByRole("heading", { name: /^Run \d+$/ }).first()).toBeVisible();
+    expect((await (await page.request.get("/api/selection")).json()).projectIds).toEqual([102]);
+    await page.unroute(/\/api\/selection$/);
   });
 });
 

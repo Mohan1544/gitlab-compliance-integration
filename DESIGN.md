@@ -1,6 +1,6 @@
 # Technical design: GitLab evidence collector
 
-**Status:** architecture implemented and covered by automated server and browser tests. The three GitLab seed states and a live force-push setting change are recorded in complete live runs; the candidate confirmed the UI comparison worked. Restoration evidence and sanitized artifacts remain pending. This design is sized for the assessment's one-user local scope while treating evidence integrity, recovery, and secret handling as production concerns.
+**Status:** implemented and verified locally with 53 server tests, 10 browser tests, and a production build. The live baseline, force-push change, and restored setting are recorded as runs 11-13 with screenshots and a video linked in [README.md](README.md#live-demonstration-evidence). The local mock demo records failure and recovery. CI configuration is present; a remote run of this revision and the manual accessibility review remain outstanding. This design fits the assessment's one-user local scope.
 
 ## The design problem
 
@@ -61,7 +61,7 @@ These API calls are not an atomic snapshot. If a default branch is renamed or re
 
 ## Persistence model
 
-The first migration will define four tables. JSON columns preserve selected provider structures without forcing every GitLab access-level variant into its own table; typed application validation governs their shape.
+Schema version 3 contains four tables. The first migration creates the evidence/configuration tables; version 2 added a process-ID ownership table, which version 3 drops because ownership is now an OS-held lock on a separate `evidence.sqlite.lock` file. Existing databases upgrade in place. JSON columns preserve selected provider structures without forcing every GitLab access-level variant into its own table; typed application validation governs their shape.
 
 | Table | Key fields | Why it exists |
 | --- | --- | --- |
@@ -80,7 +80,9 @@ Use foreign keys, transactions, WAL mode, and a busy timeout. Store the database
 | Project | pending, running, complete, partial, failed, interrupted | Complete means all required evidence for that project's state is readable; partial means useful evidence exists but a required step failed; failed means project identity itself cannot be read. |
 | Run | queued, running, completed, partial, failed, interrupted | Completed means every project is complete; partial means some useful evidence exists but not all projects are complete; failed means no requested project yielded useful evidence. |
 
-Recovery runs only after the server claims the data directory's lease (`server_lease`, schema version 2): in the same transaction it checks that no other live server holds a fresh lease, so a second server started by mistake exits without touching another process's active run. The startup recovery transaction then changes persisted queued/running runs and pending/running project rows to `interrupted`, retaining any source reads already committed and the project evidence checkpointed after each successful step, so an interrupted project still shows (and is compared on) what it observed. A user can start a new run. We do not automatically replay a half-finished run because its GitLab settings may have changed while the server was down.
+Before opening or migrating SQLite, startup takes an exclusive lock on `evidence.sqlite.lock` (SQLite `locking_mode = EXCLUSIVE` on a separate file, `DataDirectoryLock` in `lock.ts`). The operating system holds that lock for as long as the server process lives, so a second server refuses to start while the first is alive, even if the first is paused or busy, and the lock is released the moment the owner exits for any reason. This replaced an earlier process-ID lease: ownership by process ID cannot distinguish a dead server whose ID was reused from a live one, and a heartbeat deadline cannot prove a paused process has stopped writing. The OS lock has neither problem. Graceful shutdown drains collection and then releases the lock; a failed port bind also releases it. A hung server must be stopped by the operator.
+
+Recovery changes persisted queued/running runs and pending/running project rows to `interrupted`, retaining committed source reads and checkpointed evidence. Terminal outcome updates cannot overwrite completed or interrupted records. Unexpected per-project failures preserve checkpoints as partial evidence, and persistence errors are not mislabeled as malformed GitLab responses. A new run is the recovery path; automatically replaying a half-finished run could mix GitLab settings observed at different times.
 
 ## Collection algorithm
 
@@ -88,11 +90,11 @@ Recovery runs only after the server claims the data directory's lease (`server_l
 2. In one transaction, snapshot the selected IDs into a new run, insert every `run_projects` row as `pending`, and reserve the single active-run slot. Return `202` with the run ID. A concurrent start returns `409` and the active run ID.
 3. Process up to two projects concurrently. Within each project, read the project first, then the appropriate branch/branch-list endpoint, then all protection-rule pages where applicable. Persist each logical read before moving on so a crash retains partial evidence.
 4. Validate response shape at the boundary. Convert HTTP/network/parse failures into typed, sanitized outcomes. Classify `401`, `403`, and `404` separately; a project `404` may mean missing **or** inaccessible. A branch `404` after a non-empty project read is inconsistent, not unprotected.
-5. Retry timeouts, network failures, `429`, and transient `5xx` with bounded attempts and exponential backoff plus jitter. Honor `Retry-After` when it fits the total request budget; otherwise finish as rate-limited with a suggested retry time. Do not retry permanent authorization or validation errors. Never manufacture real rate-limit traffic for tests.
+5. Retry timeouts, network failures, `429`, and transient `5xx` with bounded attempts and exponential backoff plus jitter. Honor `Retry-After` when it fits the 30-second budget for that logical read; otherwise finish as rate-limited. The UI advises waiting for the provider window but does not retain an exact retry timestamp. Do not retry permanent authorization or validation errors. Never manufacture real rate-limit traffic for tests.
 6. Follow GitLab pagination's `Link: rel="next"`, with a page cap and a `gitlab.com` origin/path check before forwarding the token. A short page alone does not prove pagination ended. Reject cross-origin redirects for the same reason.
 7. Finalize every project row and then the run in transactions. A source-read failure preserves previously committed facts and the last successful observation from earlier runs.
 
-The first implementation will use the seeded three projects and a small default concurrency. Timeouts, retry counts, page caps, and selection limits will be named configuration constants with tests, rather than hidden values scattered across handlers.
+The collector processes two projects concurrently, supports up to 20 selected projects, and reads at most 20 rule pages per project. Requests have an 8-second timeout and at most three attempts. The 30-second retry budget is per logical read, not per project or run.
 
 ## Local API and UI
 
@@ -113,24 +115,24 @@ For a failed newest attempt, show “Latest attempt failed” next to “Last su
 
 - The baseline for a project is its most recent **prior complete** observation. Identify both run IDs and timestamps. Skip intervening partial/failed attempts as baselines, while showing that they occurred.
 - Compare actual branch existence/name, GitLab `protected` status, and returned fields in applicable protection rules. Normalize access entries into stable tuples and sort them; ignore provider record IDs, response order, and fetch timestamps.
-- Keep omitted/unknown fields distinct from explicit `false`, empty arrays, or confirmed absence. A coverage loss is an evidence change, not a protection change. Do not compare a partial current result as though it were a full posture snapshot.
+- Keep omitted/unknown fields distinct from explicit `false`, empty arrays, or confirmed absence. Every applicable rule field missing from either or both observations is listed as not compared. Coverage loss is not a confirmed protection change. Do not compare a partial current result as though it were a full posture snapshot. With no earlier complete baseline, use neutral wording that does not imply this observation is complete.
 - For a partial current result, compare only successfully observed facts against the last complete baseline and explicitly list what was not compared. Partial results never become baselines.
 - Treat empty-to-initialized and default-branch replacement as explicit transitions. If rule applicability cannot be established confidently, show the raw rule context and mark that comparison as limited.
 
-The live demo will manually toggle **Allowed to force push** on the synthetic protected `main` branch between two UI collections. The app should report `false -> true` with the first run as baseline. The setting will be restored after sanitized screenshots are captured.
+The recorded live demo manually toggled **Allowed to force push** on the synthetic protected `main` branch between UI collections. Runs 11-13 show `false -> true -> false`, including restoration; each comparison identifies its prior complete baseline. The screenshots and recording are linked in the README.
 
 ## Test strategy and release gates
 
 | Layer | Critical checks |
 | --- | --- |
 | Pure unit tests | Empty-repo metadata mismatch, field presence versus omission, normalization, comparison baseline, wildcard applicability boundaries, error classification, retry-budget calculation. |
-| Server/DB integration | Save selection and restart; run snapshot; one-active-run conflict; per-ID outcomes; partial read persistence; startup interruption; token-safe errors. Inject mocked GitLab HTTP into the real worker. |
-| Browser tests | Full successful collection and partial failure/recovery through the real backend and UI, with GitLab HTTP mocked and no credential. Check refresh reconnection, latest versus last-good, and baseline labeling. |
+| Server/DB integration | Save selection and restart; run snapshot; one-active-run conflict; per-ID outcomes; partial read persistence; startup interruption; data directory lock held against a second process and released by the OS when the holder is killed; terminal outcome guards; migration from v1 and v2 to v3; foreign Host/Origin refusal; storage errors kept distinct from provider errors. |
+| Browser tests | Full successful collection and partial failure/recovery through the real backend and UI, with GitLab HTTP mocked and no credential. Check refresh reconnection, latest versus last-good, neutral baseline wording, staleness, process restart, and delayed refresh ordering. |
 | Live acceptance | Two UI collections of all three real projects, manual GitLab change, correct comparison, sanitized screenshots, and no token or private data in artifacts. |
 
-The repeatable mocked failure demo will make one protected-rules read return a transient error beyond the retry budget, show partial evidence and the recovery action, then succeed on a subsequent run. Its mode will be explicit and will not use the live token.
+The repeatable mocked failure demo makes one protected-rules read return a transient error beyond the retry budget, shows partial evidence and the recovery action, then succeeds on a subsequent run. Its mode is explicit and ignores the live token. [MANUAL_TESTING.md](MANUAL_TESTING.md) maps recorded scenarios and additional review regressions to tests without claiming the old recording covers newly added cases.
 
-Milestone 1 is a runnable foundation with exact install, database setup, run, and test commands plus persistent saved selection. Milestone 2 is the reliable collector and mocked tests. Milestone 3 is the analyst UI and comparisons. Milestone 4 is browser tests, failure demo, live screenshots, README completion, and secret review. Each milestone must run from a clean checkout before it is considered done.
+The implementation, failure demo, browser tests, live artifacts, and setup documentation are present. The [CI workflow](.github/workflows/ci.yml) installs locked dependencies and Chromium on Windows, then runs server tests and the build/browser suite using the pinned Node version. Local verification has passed; remote CI execution awaits publication of this revision. The manual accessibility review is not yet recorded.
 
 ## Main risks and limits
 
@@ -143,4 +145,4 @@ Milestone 1 is a runnable foundation with exact install, database setup, run, an
 
 ## Sources and verification
 
-This design is based on the supplied two-page assessment, [GitLab Projects API](https://docs.gitlab.com/api/projects/), [Branches API](https://docs.gitlab.com/api/branches/), [Protected branches API](https://docs.gitlab.com/api/protected_branches/), [REST pagination](https://docs.gitlab.com/api/rest/#pagination), [protection-rule behavior](https://docs.gitlab.com/user/project/repository/branches/protection_rules/), and [SQLite WAL documentation](https://www.sqlite.org/wal.html). The protected, unprotected, and empty seed responses were verified live through the verifier and the new collector. Automated server and browser tests exercise the implementation; live UI acceptance artifacts are still pending.
+This design is based on the supplied two-page assessment, [GitLab Projects API](https://docs.gitlab.com/api/projects/), [Branches API](https://docs.gitlab.com/api/branches/), [Protected branches API](https://docs.gitlab.com/api/protected_branches/), [REST pagination](https://docs.gitlab.com/api/rest/#pagination), [protection-rule behavior](https://docs.gitlab.com/user/project/repository/branches/protection_rules/), and [SQLite WAL documentation](https://www.sqlite.org/wal.html). The protected, unprotected, and empty seed responses were verified live through the verifier and collector. Automated tests exercise the implementation, and the README links the existing live UI acceptance artifacts. Follow-up fixes were verified using synthetic data and did not alter GitLab settings.

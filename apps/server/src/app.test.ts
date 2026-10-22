@@ -244,53 +244,51 @@ describe("collection API", () => {
     expect(store.getSelection()).toEqual([3]);
   });
 
-  it("does not let a second server interrupt a run owned by a live server", () => {
-    const directory = mkdtempSync(join(tmpdir(), "gitlab-evidence-"));
-    cleanup.push(() => rmSync(directory, { recursive: true, force: true }));
-    const path = join(directory, "evidence.sqlite");
-    const first = new Store(path);
-    cleanup.push(() => first.close());
-    expect(first.recoverOnStartup("first", 1111, () => true)).toEqual({ acquired: true });
-    const run = first.createRun([17]);
-    first.markRunRunning(run.id);
-    first.markProjectRunning(run.id, 17);
-
-    const second = new Store(path);
-    cleanup.push(() => second.close());
-    expect(second.recoverOnStartup("second", 2222, (pid) => pid === 1111)).toEqual({ acquired: false, holderPid: 1111 });
-    expect(second.getRun(run.id)?.state).toBe("running");
-    expect(second.getRun(run.id)?.projects?.[0]?.state).toBe("running");
-    expect(first.renewLease("first")).toBe(true);
-
-    // Once the owner's process is gone, the next server takes over and recovers its abandoned run.
-    expect(second.recoverOnStartup("second", 2222, () => false)).toEqual({ acquired: true });
-    expect(second.getRun(run.id)?.state).toBe("interrupted");
-    expect(first.renewLease("first")).toBe(false);
-  });
-
-  it("takes over a lease that has expired even if its process id is still in use", () => {
+  it("does not overwrite interrupted outcomes when a late worker tries to finish", () => {
     const store = new Store(":memory:");
     cleanup.push(() => store.close());
-    expect(store.recoverOnStartup("hung", 1111, () => true)).toEqual({ acquired: true });
-    expect(store.recoverOnStartup("next", 2222, () => true, 0)).toEqual({ acquired: true });
-    expect(store.renewLease("hung")).toBe(false);
+    const run = store.createRun([1]);
+    store.markRunRunning(run.id);
+    store.markProjectRunning(run.id, 1);
+    store.interruptActiveRuns();
+    const interrupted = store.getRun(run.id);
+    store.markProjectRunning(run.id, 1);
+    store.finishProject(run.id, 1, "complete", null, null);
+    store.failProjectKeepingEvidence(run.id, 1, "late_error");
+    store.finishRun(run.id);
+    expect(store.getRun(run.id)).toEqual(interrupted);
   });
 
-  it("upgrades a version 1 database to version 2 without losing data", () => {
+  it("keeps a first partial observation distinct from the absence of a complete baseline", async () => {
+    const store = new Store(":memory:");
+    cleanup.push(() => store.close());
+    store.saveSelection([1]);
+    const app = createApp({ store, token: "mock-token", transport: transport({ failRules: true }), sleep: async () => {} });
+    cleanup.push(() => app.close());
+    const run = (await app.inject({ method: "POST", url: "/api/runs" })).json<Run>();
+    expect((await waitForRun(app, run.id)).projects?.[0]?.state).toBe("partial");
+    const result = (await app.inject({ method: "GET", url: `/api/runs/${run.id}/changes` })).json();
+    expect(result.comparisons[0]).toMatchObject({ projectId: 1, status: "no_baseline", changes: [] });
+  });
+
+  it.each([
+    ["version 1", "PRAGMA user_version = 1;"],
+    ["version 2 with its server_lease table", "CREATE TABLE server_lease (id INTEGER PRIMARY KEY, owner TEXT, pid INTEGER, renewed_at_ms INTEGER); INSERT INTO server_lease VALUES (1, 'old', 4242, 0); PRAGMA user_version = 2;"],
+  ])("upgrades a %s database to version 3 without losing data", (_name, downgrade) => {
     const directory = mkdtempSync(join(tmpdir(), "gitlab-evidence-"));
     cleanup.push(() => rmSync(directory, { recursive: true, force: true }));
     const path = join(directory, "evidence.sqlite");
     let store = new Store(path);
     store.saveSelection([5, 6]);
     const run = store.createRun([5]);
-    store.db.exec("DROP TABLE server_lease; PRAGMA user_version = 1;");
+    store.db.exec(downgrade);
     store.close();
     store = new Store(path);
     cleanup.push(() => store.close());
-    expect((store.db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(2);
+    expect((store.db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(3);
+    expect(store.db.prepare("SELECT name FROM sqlite_master WHERE name = 'server_lease'").get()).toBeUndefined();
     expect(store.getSelection()).toEqual([5, 6]);
     expect(store.getRun(run.id)?.requestedProjectIds).toEqual([5]);
-    expect(store.recoverOnStartup("owner", 1, () => true)).toEqual({ acquired: true });
   });
 
   it("persists selection and marks unfinished work interrupted after restart", () => {

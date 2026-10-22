@@ -111,7 +111,7 @@ export function compareEvidence(before: Evidence, after: Evidence): EvidenceComp
       // A field GitLab omitted on either side is unknown there: losing (or gaining) visibility of a setting
       // does not prove its value changed, so it is listed as not compared rather than reported as a change.
       if (beforeValue === undefined || afterValue === undefined) {
-        if (beforeValue !== afterValue) notCompared.push(`${field} (rule ${right.label})`);
+        notCompared.push(`${field} (rule ${right.label})`);
       } else if (!same(beforeValue, afterValue)) {
         changes.push({ field, rule: right.label, before: beforeValue, after: afterValue });
       }

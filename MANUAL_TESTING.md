@@ -8,7 +8,7 @@ On October 22, 2026, the candidate reported completing the manual scenarios in t
 
 ## Automated and recorded coverage
 
-Every scenario below also has an automated browser test in [tests/e2e/analyst-flow.spec.ts](tests/e2e/analyst-flow.spec.ts) that runs the real backend with mocked GitLab HTTP, and appears in the [mock demo video](https://mohan1544.github.io/gitlab-compliance-integration/demo/) ([download](docs/demo/mock/mock-demo.webm)).
+Scenarios 1-9 below also have automated browser coverage in [tests/e2e/analyst-flow.spec.ts](tests/e2e/analyst-flow.spec.ts) using the real backend with mocked GitLab HTTP, and appear in the [mock demo video](https://mohan1544.github.io/gitlab-compliance-integration/demo/) ([download](docs/demo/mock/mock-demo.webm)). Additional review regressions are listed separately; the earlier recording is not evidence that those newer checks were run manually. Current local verification passes 53 server tests and 10 browser tests.
 
 | # | Scenario | Automated browser test | Video | Screenshot |
 | --- | --- | --- | --- | --- |
@@ -22,6 +22,7 @@ Every scenario below also has an automated browser test in [tests/e2e/analyst-fl
 | 8 | Refresh while collection is running | *successful collection reconnects after a mid-run refresh…* | Part 1 | [mock-03](docs/demo/mock/mock-03-run1-reconnected-after-refresh.png) |
 | 9 | Stop and restart without losing history | *a restart keeps selection and history, and a run stopped mid-collection becomes interrupted* | Part 2 | [mock-15](docs/demo/mock/mock-15-after-restart.png) |
 | — | Abrupt stop mid-run (see below) | Same test as scenario 9 | Part 2 | [mock-16](docs/demo/mock/mock-16-interrupted-run.png) |
+| — | Delayed refresh cannot override the selected run | *a delayed refresh cannot override the run the analyst selected* | Not recorded | Not captured |
 
 ## Start a separate test session
 
@@ -75,7 +76,7 @@ The first three collections form the failure/recovery demonstration. Do them bef
 - Project 101 should show protected `main` and **Force push: No**.
 - Project 102 should show unprotected `main` with no visible protection rules.
 - Project 103 should show an empty repository and no actual branch.
-- The comparison should say **First complete observation; no baseline yet.**
+- The comparison should say **No earlier complete baseline is available.** This wording also applies to a first partial observation and does not imply that it was complete.
 
 Record: [ ] Pass [ ] Issue found
 
@@ -156,11 +157,28 @@ Record: [ ] Pass [ ] Issue found
 
 Record: [ ] Pass [ ] Issue found
 
+## Additional review regressions
+
+These checks use synthetic data. `npm test` runs the storage, ownership, comparison, and request-boundary regressions without a browser or GitLab credentials. `npm run test:e2e` includes the deterministic delayed-response case. See [README.md](README.md#tests) for browser installation and the Chrome fallback.
+
+| Concern | Automated coverage | Expected behavior |
+| --- | --- | --- |
+| Second server on the same data | `lock.test.ts`: *is held against other processes and released by the OS when the holder is killed* | A second process cannot take the data directory while the owner lives; once the owner is killed, the next start succeeds immediately. |
+| Stale selection read during a save | Browser test: *a delayed refresh cannot overwrite a selection saved after it started* | The saved selection stays saved; no unsaved-changes warning appears. |
+| Late worker completion | `app.test.ts`: *does not overwrite interrupted outcomes when a late worker tries to finish* | Project/run state, error, and terminal timestamps remain unchanged. |
+| Storage error after an observation | `collector.test.ts`: *keeps checkpointed evidence when an unexpected error stops a project*; `gitlab.test.ts`: *propagates a persistence failure without blaming the provider or retrying the write as unreadable* | Checkpointed evidence remains partial; a database exception is not recorded as a malformed GitLab response. |
+| Unknown fields on either or both sides | `comparison.test.ts`: *treats a rule field GitLab stopped (or started) returning as not compared, never as a changed setting* | Each missing rule field is listed as not compared. Explicit false and empty access lists remain comparable. |
+| First partial observation | `app.test.ts`: *keeps a first partial observation distinct from the absence of a complete baseline* | A partial outcome retains evidence and reports no prior complete baseline. |
+| Foreign-site requests | `app.test.ts`: *refuses foreign Host headers and cross-site state changes, and allows the local UI* | HTTP 403, no new run, and no changed selection; the local UI still works. |
+| Stale UI responses | Browser test: *a delayed refresh cannot override the run the analyst selected* | A controlled delayed response does not switch the selected run. |
+
+To check duplicate startup manually, keep this mock API running and open a second terminal with the **same** `DATA_DIR` and `MOCK_GITLAB_SCENARIO=partial-recovery`, but set `SERVER_PORT=3002`. Start the built API with `node apps/server/dist/main.js` after `npm run build`. It must exit with “Another server is already running with the data directory ...”, while the original UI/run continues normally. Using a different port demonstrates data-directory ownership rather than a port conflict. If the owner is hung, stop it before restarting; never delete the SQLite or lock files while it is running.
+
 ## Tests that require a different setup
 
 - **Abrupt backend interruption:** normal Ctrl+C is a graceful shutdown and may finish the active run, so it does not produce an interrupted outcome. The browser test for scenario 9 kills the API process mid-run instead, restarts it, and checks the run is marked `interrupted` with its observed evidence kept; Part 2 of the mock video shows the same.
 - **401, 403, 429, timeout and malformed provider response:** automated tests cover these at the GitLab boundary. The current manual mock mode does not offer selectors for them. Do not edit or revoke the real token just to manufacture these failures.
-- **Real GitLab setting change:** perform this later in live mode, following the seed guide. The mock change above is simulated and is not a substitute for the required live demonstration.
+- **Real GitLab setting change:** the existing baseline/change/restoration demonstration is linked in the README. To repeat it, use live mode and follow the seed guide. The mock change above is simulated and is not a substitute for that live evidence.
 
 ## Return to your real projects
 

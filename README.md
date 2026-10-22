@@ -2,7 +2,7 @@
 
 A local, read-only tool for a compliance analyst to collect GitLab.com branch-protection evidence, investigate collection failures, and understand how a project's protection posture changes between collections.
 
-**Status:** implemented and verified. 48 server tests and 9 browser tests pass on Node.js 24.19.0. A live two-collection demonstration against real GitLab.com projects is recorded under [Live demonstration](#live-demonstration-evidence).
+**Status:** implemented and verified locally. 53 server tests and 10 browser tests pass on Node.js 24.19.0. A live demonstration against real GitLab.com projects, including restoration of the changed setting, is recorded under [Live demonstration](#live-demonstration-evidence). The [CI workflow](.github/workflows/ci.yml) checks a clean install, server tests, build, and browser tests on Windows; its first remote run is pending publication of this revision.
 
 ▶ **[Watch the demo videos](https://mohan1544.github.io/gitlab-compliance-integration/demo/)** (mocked partial failure and recovery, and the live GitLab.com change), playable in the browser. GitHub's file view downloads `.webm` files rather than playing them, so the videos are served through GitHub Pages.
 
@@ -72,7 +72,7 @@ In a second terminal, run `npm run dev:web` and open http://127.0.0.1:5173. Mock
 
 The scenario repeats every three runs and is keyed to the stored run ID, so a server restart does not reset it. Delete `data/mock-demo` to start again from run 1.
 
-**Recording:** [watch it in the browser](https://mohan1544.github.io/gitlab-compliance-integration/demo/) (2 min 22 s, captioned), or download [mock-demo.webm](docs/demo/mock/mock-demo.webm). Locally, [docs/demo/index.html](docs/demo/index.html) plays every demo video on one page. **Part 1** shows the three runs above, including the mid-run refresh. **Part 2** shows the other scenarios from [MANUAL_TESTING.md](MANUAL_TESTING.md): invalid input, total failure, a mixed run, unsaved selection, a server restart, and an abrupt stop mid-run. Screenshots:
+**Recording:** [watch it in the browser](https://mohan1544.github.io/gitlab-compliance-integration/demo/) (2 min 19 s, captioned), or download [mock-demo.webm](docs/demo/mock/mock-demo.webm). Locally, [docs/demo/index.html](docs/demo/index.html) plays every demo video on one page. **Part 1** shows the three runs above, including the mid-run refresh. **Part 2** shows the other scenarios from [MANUAL_TESTING.md](MANUAL_TESTING.md): invalid input, total failure, a mixed run, unsaved selection, a server restart, and an abrupt stop mid-run. Screenshots:
 
 | Step | Screenshot |
 | --- | --- |
@@ -97,9 +97,9 @@ The scenario repeats every three runs and is keyed to the stored run ID, so a se
 ## Tests
 
 ```powershell
-npm test            # 48 server tests (Vitest), about 2 s
+npm test            # 53 server tests (Vitest), about 2 s
 npx playwright install chromium   # once: downloads Playwright's bundled Chromium
-npm run test:e2e    # builds, then 9 browser tests (Playwright), about 50 s
+npm run test:e2e    # builds, then 10 browser tests (Playwright), about 50 s
 ```
 
 To use an installed Google Chrome instead of the bundled Chromium, run `$env:PLAYWRIGHT_CHANNEL = "chrome"` before `npm run test:e2e`.
@@ -112,13 +112,14 @@ Tests target the places where a wrong answer looks like a right one: a failed re
 
 | Area | Cases | Why |
 | --- | --- | --- |
-| GitLab boundary ([gitlab.test.ts](apps/server/src/gitlab.test.ts)) | `Retry-After` honoured, and refused when it exceeds the request budget; 401/403/404/3xx/422 not retried and classified; 5xx and timeouts retried with bounded attempts; network-error recovery; malformed response shape; empty list recorded as a confirmed absence; token never sent to a foreign or other-project pagination URL. | A misclassified error gives the analyst the wrong next step. Retrying permanent errors wastes rate limit. The token boundary is a security invariant. |
+| GitLab boundary ([gitlab.test.ts](apps/server/src/gitlab.test.ts)) | `Retry-After` honoured, and refused when it exceeds the request budget; 401/403/404/3xx/422 not retried and classified; 5xx and timeouts retried with bounded attempts; network-error recovery; malformed response shape; persistence failures propagated rather than mislabeled as malformed provider responses; empty list recorded as a confirmed absence; token never sent to a foreign or other-project pagination URL. | A misclassified error gives the analyst the wrong next step. Retrying permanent errors wastes rate limit. The token boundary is a security invariant. |
 | Collection ([collector.test.ts](apps/server/src/collector.test.ts)) | `Link` pagination with provenance per page; a full page without pagination headers; page cap marked partial rather than silently truncated; wildcard-only protection; protected with no visible rule; branch 404 never classified as unprotected; default branch renamed between reads; `empty_repo` contradicted by branches; project 404 and ID mismatch; rules failure keeps the protected flag; an unexpected error mid-project keeps checkpointed evidence (partial), and fails only when nothing was observed. | These are the honest-evidence rules: an unreadable setting is never a confirmed absence, and partial results are kept. |
-| Comparison ([comparison.test.ts](apps/server/src/comparison.test.ts)) | Access-entry order and display names ignored; field-level rule changes; wildcard rules that apply versus unrelated rules; applicable rule added or removed; a rule field returned in one collection and omitted in the other is *not compared*, never a change; partial evidence compared only on observed facts; empty → initialized; visibility. | False positives erode trust in the change view; false negatives hide real posture changes. |
-| API and persistence ([app.test.ts](apps/server/src/app.test.ts)) | Collection of the three seed states; partial failure then recovery against the last complete baseline; one active run (409 naming the active run); start refused without selection or token; completed runs, requested IDs and reads survive a restart; evidence observed before a server stop is kept and compared as partial; interrupted runs never stay running; a second server cannot interrupt a live server's run, takes over only from a dead or expired owner, and a version 1 database upgrades without data loss; foreign `Host` and cross-site `Origin` requests are refused while the local UI works. | Durable history, consistent execution under failure and repeated use, and the local trust boundary. |
+| Comparison ([comparison.test.ts](apps/server/src/comparison.test.ts)) | Access-entry order and display names ignored; field-level rule changes; wildcard rules that apply versus unrelated rules; applicable rule added or removed; a rule field omitted on either or both sides is *not compared*, never a change; explicit false and observed empty access lists remain comparable; partial evidence compared only on observed facts; empty → initialized; visibility. | False positives erode trust in the change view; false negatives hide real posture changes. |
+| API and persistence ([app.test.ts](apps/server/src/app.test.ts)) | Collection of the three seed states; partial failure then recovery against the last complete baseline; one active run (409 naming the active run); start refused without selection or token; completed runs, requested IDs and reads survive a restart; evidence observed before a server stop is kept and compared as partial; interrupted runs never stay running; late completion writes preserve terminal outcomes; first partial evidence without a baseline; version 1 and version 2 databases upgrade to version 3 without data loss; foreign `Host` and cross-site `Origin` requests are refused while the local UI works. | Durable history, consistent execution under failure and repeated use, and the local trust boundary. |
+| Data directory lock ([lock.test.ts](apps/server/src/lock.test.ts)) | One holder at a time; free again after release; held against a second process, and released by the operating system the moment the holding process is killed. | A second server must never interrupt a live server's run, and a crashed server must never block the next start. |
 | Browser ([analyst-flow.spec.ts](tests/e2e/analyst-flow.spec.ts)) | Successful collection with a mid-run refresh; partial failure with last-good evidence, partial comparison and recovery; stale-evidence and older-run labels (browser clock moved 8 days forward); unsaved selection blocks Start, and earlier runs keep their original IDs; invalid or duplicate IDs rejected without creating a run; a 404 project fails with guidance and no retries; a mixed run is partial and keeps both outcomes; a server restart keeps selection and history, and a server killed mid-run comes back with that run marked interrupted; a delayed refresh can never switch away from the run the analyst selected. | Exercises the real backend collector through the real UI with only GitLab HTTP mocked. The restart test starts and stops its own API process to prove interrupted work never looks active. |
 
-The key regression tests (interrupted-run evidence, the restart browser test, and one test for each of the five review findings) were each checked by temporarily removing the code they protect and confirming they fail.
+The key regression tests (interrupted-run evidence, the restart browser test, and one test for each of the five original review findings) were each checked by temporarily removing the code they protect and confirming they fail. Follow-up checks for late completion writes, fields omitted in both observations, persistence-error attribution, and a selection save overwritten by a stale refresh were also run before their fixes and failed as expected, then passed after the fixes. The suite additionally checks an initial partial collection without a baseline and confirmed empty access lists.
 
 ## Live demonstration evidence
 
@@ -177,8 +178,8 @@ Earlier live runs show the same behaviour: runs 6 → 7 → 8 (force push on, th
 - **One active run.** A partial unique index in SQLite allows only one queued or running run. A second start returns `409` naming the active run, so repeated clicks or tabs cannot create overlapping collections.
 - **Every requested project is accounted for.** All `run_projects` rows are created as `pending` in the same transaction as the run. Each ends as `complete`, `partial`, `failed` or `interrupted`, and an unexpected error in one project does not stop the others.
 - **Durable as it goes.** Each source read is written as soon as it finishes, and a project's evidence is checkpointed after each successful step. A crash keeps everything observed up to that point, and so does an unexpected error inside one project: it becomes `partial` with its checkpointed evidence (or `failed` only if nothing was observed) rather than losing collected facts.
-- **One server owns the data directory.** On startup a server must hold the database's lease (a `server_lease` row with its process ID, renewed every 5 s) before it touches anything. A second server started against the same data, for example by mistake in another terminal, finds the first server alive and exits with a clear message instead of interrupting its run. A new server takes over only when the previous holder's process has gone or its lease has not been renewed for 30 s; a server that loses its lease stops rather than write alongside another.
-- **Interrupted work never looks active.** After claiming the lease, the server marks any queued or running run and its unfinished projects `interrupted`, keeping their evidence. Runs are not replayed automatically, because GitLab may have changed while the server was down; the analyst starts a new run.
+- **One server owns the data directory.** Before opening, migrating or recovering the database, a server takes an exclusive lock on `evidence.sqlite.lock`, held by the operating system for as long as the server process is alive ([lock.ts](apps/server/src/lock.ts)). A second server started against the same data, even on another port, finds the lock taken and exits with a clear message without touching anything, including while the first server is paused or busy. The operating system releases the lock the moment the owner exits for any reason (graceful stop, crash or kill), so a crashed server never blocks the next start: there is no process ID that could be reused and no heartbeat to expire. A server that fails to bind its port releases the lock. Terminal outcome updates also ignore late worker writes to completed or interrupted records.
+- **Interrupted work never looks active.** After taking the lock, the server marks any queued or running run and its unfinished projects `interrupted`, keeping their evidence. Runs are not replayed automatically, because GitLab may have changed while the server was down; the analyst starts a new run.
 - **Local trust boundary.** The API binds to `127.0.0.1` and also refuses requests whose `Host` is not a loopback name (blocking DNS rebinding) and state-changing requests whose `Origin` is another site (blocking cross-site posts), so a web page open in the analyst's browser cannot read evidence or start collections.
 - **The UI shows the run the analyst chose.** Refreshes are ordered, and a poll is skipped while the previous one is still in flight, so a slow response that started before the analyst picked another run can never switch the view back.
 - **History is immutable.** A run stores the IDs requested when it started, so later selection changes do not rewrite it. Failed or partial runs never become comparison baselines, and earlier evidence is never overwritten.
@@ -200,11 +201,11 @@ Earlier live runs show the same behaviour: runs 6 → 7 → 8 (force push on, th
 - **Baseline:** the project's most recent earlier `complete` observation. Its run ID and time are shown beside every comparison and on each before/after value.
 - **Compared:** visibility; classification (protected, unprotected or empty); actual default branch; GitLab's protected flag; and, for each rule that applies to the default branch, force push, code-owner approval, and push, merge and unprotect access entries. A rule starting or stopping to apply is reported too.
 - **Ignored:** order of entries, provider record IDs, display text such as user names (a rename is not a protection change), fetch times, and rules that do not apply to the default branch.
-- **Unknown is not a change:** a field GitLab omitted stays distinct from an explicit `false`, and a rule field returned in one collection but omitted in the other is listed as *not compared* for that rule, not as a changed setting: losing (or gaining) visibility of a setting does not prove its value changed. When the current attempt is partial, only the facts it actually observed are compared and the rest are listed as *not compared*, so a failed read is never reported as a removed rule. A project still being collected shows *in progress*; one with no current evidence is *not comparable*.
+- **Unknown is not a change:** a field GitLab omitted stays distinct from an explicit `false` or observed empty list. A rule field missing from either or both observations is listed as *not compared* for that rule: a missing value does not establish a setting change. When the current attempt is partial, only the facts it actually observed are compared and the rest are listed as *not compared*, so a failed read is never reported as a removed rule. A project still being collected shows *in progress*; one with no current evidence is *not comparable*. With no earlier complete observation, the UI says **No earlier complete baseline is available**, whether this attempt is complete or partial.
 
 ## Data model
 
-SQLite, schema version 2 (see [store.ts](apps/server/src/store.ts)). Migrations run on startup; a version 1 database is upgraded in place without losing data.
+SQLite, schema version 3 (see [store.ts](apps/server/src/store.ts)). Migrations run on startup, after the data directory lock is taken; version 1 and 2 databases are upgraded in place without losing data. (Version 2's `server_lease` table, a process-ID lease, was replaced in version 3 by the OS-held lock file and is dropped.)
 
 | Table | Key | Holds |
 | --- | --- | --- |
@@ -212,7 +213,8 @@ SQLite, schema version 2 (see [store.ts](apps/server/src/store.ts)). Migrations 
 | `runs` | `id` | Requested IDs snapshot, state, created, started and finished times. A partial unique index allows at most one queued or running run. |
 | `run_projects` | `(run_id, requested_project_id)` | One outcome per requested project: state, returned project ID, evidence JSON, error code, times. |
 | `source_reads` | `id`; unique `(run_id, project, source, sequence)` | Provenance for every request, including each pagination page: endpoint, outcome, HTTP status, attempts, times, the validated response fields, safe error code. |
-| `server_lease` | single row | Which server process owns the data directory (random owner ID, process ID, last renewal), so only the owner recovers interrupted runs. |
+
+The separate `evidence.sqlite.lock` file in the data directory holds no evidence; its exclusive OS lock marks which server process owns the directory.
 
 Evidence JSON holds the project facts, the default branch and its protected flag, the rules, which rules apply (exact or wildcard), any coverage warnings, and the classification.
 
@@ -231,6 +233,7 @@ Evidence JSON holds the project facts, the default branch and its protected flag
 - **No sign-in:** the local API trusts any request from the analyst's own machine that passes the loopback Host and Origin checks; there are no user accounts (out of scope).
 - **History view:** the API returns the latest 100 runs. There is no retention policy or export.
 - **Platform:** developed and verified on Windows 11 with Node.js 24.19.0.
+- **One server per data directory:** a hung server keeps its lock until it is stopped, so stop it (Ctrl+C, or end the process) before starting another against the same data. Do not delete the database or lock file to get around a running server. A separate `DATA_DIR` can run independently.
 
 ## What I would change for production
 
@@ -244,14 +247,16 @@ Evidence JSON holds the project facts, the default branch and its protected flag
 
 ## AI usage and verification
 
-AI coding assistants were used throughout, with every result checked by running it.
+AI coding assistants were used throughout. The verification performed for the implementation and follow-up fixes is recorded below.
 
 - **OpenAI Codex** helped organize the assessment, research GitLab's documented APIs, write the planning and seed guides and the read-only verification script, implement the first version of the app, collector and tests, and later refine the UI (before/after cards, unsaved-selection guard) and the manual testing guide.
 - **Anthropic Claude Code** reviewed the implementation against the assessment PDF as an architect would, then implemented the fixes it found: wildcard rule matching and coverage warnings, field-level comparison that ignores display text, comparison of partial evidence on observed facts only, staleness labels, keeping evidence when a run is interrupted, the Node version check, the expanded test suite (5 → 48 server tests; browser tests for the mid-run refresh, every manual scenario, and a server killed mid-run), the demo recordings, and this README. An independent review then found five issues (omitted rule fields reported as changes, a second server interrupting another's run, unexpected errors clearing checkpointed evidence, a stale poll overriding the selected run, and missing Host/Origin checks); each was fixed with a regression test that was confirmed to fail on the old code.
+- **OpenAI Codex follow-up** reproduced the remaining live-owner takeover race and corrected it by retaining ownership until the process exits. It also guarded terminal outcomes, separated storage failures from provider validation, exposed fields unknown in both comparisons, corrected first-observation wording, reconciled the documentation, and added CI configuration.
+- **Claude Code follow-up review** of that work found a remaining race (a refresh that read the selection before a save could overwrite the saved selection, which also made two browser tests intermittently fail) and an availability risk in the process-ID ownership check (after a crash, a reused process ID could block startup). It fixed the race with a deterministic regression test, replaced the process-ID lease with an OS-held lock file proven with real processes (a second server is refused; a killed server's lock is released immediately), made the mock return every rule field like GitLab, and re-recorded the mock demo.
 
 **How the output was verified:**
 
-- Every claimed behaviour has an automated test that runs without credentials.
+- Automated tests cover the critical collection, comparison, persistence, recovery, local request checks, and browser workflows without GitLab credentials. The manual accessibility review remains outstanding.
 - The interrupted-run test was checked to fail when the code it protects is removed.
 - API assumptions were checked against live, read-only GitLab.com responses (`scripts/verify-gitlab.mjs`); this is how the empty-repository `default_branch` mismatch was found.
 - The manual scenarios in [MANUAL_TESTING.md](MANUAL_TESTING.md) were run by hand.

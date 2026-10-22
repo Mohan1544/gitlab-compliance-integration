@@ -151,7 +151,7 @@ function ComparisonView({ comparison, currentRunId }: { comparison: Comparison; 
   return <div className="comparison">
     <h3>Project {comparison.projectId}</h3>
     {comparison.status === "in_progress" && <p>Collection in progress; changes appear when this project finishes.</p>}
-    {comparison.status === "no_baseline" && <p>First complete observation; no baseline yet.</p>}
+    {comparison.status === "no_baseline" && <p>No earlier complete baseline is available.</p>}
     {comparison.status === "not_comparable" && <p>No evidence was collected in this attempt. No posture change is inferred.{comparison.baselineRunId ? ` Last complete run: ${comparison.baselineRunId}.` : ""}</p>}
     {comparison.status === "partially_compared" && <p>Partial evidence against run {comparison.baselineRunId} ({when(comparison.baselineFinishedAt)}). Only facts observed in this attempt are compared.</p>}
     {comparison.status === "compared" && <p>Against run {comparison.baselineRunId} ({when(comparison.baselineFinishedAt)}).</p>}
@@ -246,6 +246,9 @@ export default function App() {
       await api("/api/selection", { method: "PUT", body: JSON.stringify({ projectIds: ids }) });
       setSavedIds(ids);
       setIdsInput(ids.join(", "));
+      // A refresh that read the selection before this save may still be in flight. Starting a newer refresh
+      // supersedes it, so the old selection can never overwrite the one just saved.
+      await refresh();
     } catch (reason) { setError((reason as Error).message); } finally { setBusy(false); }
   }
 

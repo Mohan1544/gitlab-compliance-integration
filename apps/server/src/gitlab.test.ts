@@ -36,6 +36,25 @@ function setup(steps: (HttpResponse | Error)[]) {
 const timeoutError = () => Object.assign(new Error("timed out"), { name: "TimeoutError" });
 
 describe("GitLab boundary", () => {
+  it("propagates a persistence failure without blaming the provider or retrying the write as unreadable", async () => {
+    const store = new Store(":memory:");
+    stores.push(store);
+    const run = store.createRun([1]);
+    const record = store.recordRead.bind(store);
+    const failure = new Error("synthetic write failure");
+    let writes = 0;
+    store.recordRead = (read) => {
+      if (++writes === 1) throw failure;
+      record(read);
+    };
+    const { transport, calls } = scripted([{ status: 200, headers: {}, body: project }]);
+    const client = new GitLabClient("secret", transport, store, async () => {});
+    await expect(client.get(run.id, 1, "project", 1, "projects/1", parseProject)).rejects.toBe(failure);
+    expect(calls).toHaveLength(1);
+    expect(writes).toBe(1);
+    expect(store.getRun(run.id)?.projects?.[0]?.reads).toEqual([]);
+  });
+
   it("does not forward the token to an external pagination URL", async () => {
     const { client, runId, calls, reads } = setup([]);
     const result = await client.get(runId, 1, "protected_branches", 1,

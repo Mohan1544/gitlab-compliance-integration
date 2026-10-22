@@ -78,16 +78,18 @@ export class GitLabClient {
 
       lastStatus = response.status;
       if (response.status >= 200 && response.status < 300) {
+        let value: T;
         try {
-          const value = parse(response.body);
-          this.store.recordRead({ runId, projectId, source, sequence, endpoint: `${url.pathname}${url.search}`,
-            state: Array.isArray(value) && value.length === 0 ? "confirmed_absent" : "observed",
-            httpStatus: response.status, attempts, startedAt, finishedAt: new Date().toISOString(), response: value });
-          return { ok: true, value, headers: response.headers };
+          value = parse(response.body);
         } catch {
           errorCode = "malformed_response";
           break;
         }
+        // Persistence failures belong to the worker's error path, not to provider response validation.
+        this.store.recordRead({ runId, projectId, source, sequence, endpoint: `${url.pathname}${url.search}`,
+          state: Array.isArray(value) && value.length === 0 ? "confirmed_absent" : "observed",
+          httpStatus: response.status, attempts, startedAt, finishedAt: new Date().toISOString(), response: value });
+        return { ok: true, value, headers: response.headers };
       }
 
       errorCode = classifyStatus(response.status);

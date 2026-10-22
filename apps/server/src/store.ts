@@ -36,10 +36,7 @@ interface ReadRow {
   error_code: string | null;
 }
 
-const SCHEMA_VERSION = 2;
-// A live owner renews its lease every LEASE_RENEW_MS; a lease older than LEASE_TTL_MS is treated as abandoned.
-export const LEASE_RENEW_MS = 5_000;
-export const LEASE_TTL_MS = 30_000;
+const SCHEMA_VERSION = 3;
 
 export class ActiveRunError extends Error {
   constructor(readonly activeRunId: number) {
@@ -109,45 +106,12 @@ export class Store {
       );
       PRAGMA user_version = 1;
     `));
-    if (version < 2) this.transaction(() => this.db.exec(`
-      CREATE TABLE server_lease (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        owner TEXT NOT NULL,
-        pid INTEGER NOT NULL,
-        renewed_at_ms INTEGER NOT NULL
-      );
-      PRAGMA user_version = 2;
+    // Version 2 added a server_lease table keyed by process ID. Version 3 replaces it with an OS-held lock file
+    // (see lock.ts), so a reused process ID can never block startup; the table is dropped.
+    if (version < 3) this.transaction(() => this.db.exec(`
+      DROP TABLE IF EXISTS server_lease;
+      PRAGMA user_version = 3;
     `));
-  }
-
-  // One server process owns a data directory at a time, so only the owner may treat queued/running runs as
-  // abandoned. A new process takes over only when the holder's process is gone or its lease has expired;
-  // otherwise it gets the holder's PID back and must not touch the database.
-  recoverOnStartup(owner: string, pid: number, isAlive: (pid: number) => boolean, ttlMs = LEASE_TTL_MS):
-    { acquired: true } | { acquired: false; holderPid: number } {
-    return this.transaction(() => {
-      const now = Date.now();
-      const holder = this.db.prepare("SELECT owner, pid, renewed_at_ms FROM server_lease WHERE id = 1").get() as
-        { owner: string; pid: number; renewed_at_ms: number } | undefined;
-      if (holder && holder.owner !== owner && now - holder.renewed_at_ms < ttlMs && isAlive(holder.pid)) {
-        return { acquired: false as const, holderPid: holder.pid };
-      }
-      this.db.prepare(`INSERT INTO server_lease (id, owner, pid, renewed_at_ms) VALUES (1, ?, ?, ?)
-        ON CONFLICT (id) DO UPDATE SET owner = excluded.owner, pid = excluded.pid, renewed_at_ms = excluded.renewed_at_ms`)
-        .run(owner, pid, now);
-      this.markActiveRunsInterrupted();
-      return { acquired: true as const };
-    });
-  }
-
-  // Returns false if another process has taken the lease, in which case this process must stop writing.
-  renewLease(owner: string): boolean {
-    return Number(this.db.prepare("UPDATE server_lease SET renewed_at_ms = ? WHERE id = 1 AND owner = ?")
-      .run(Date.now(), owner).changes) === 1;
-  }
-
-  releaseLease(owner: string): void {
-    this.db.prepare("DELETE FROM server_lease WHERE id = 1 AND owner = ?").run(owner);
   }
 
   getSelection(): number[] {
@@ -180,7 +144,7 @@ export class Store {
   }
 
   markProjectRunning(runId: number, projectId: number): void {
-    this.db.prepare("UPDATE run_projects SET state = 'running', started_at = ? WHERE run_id = ? AND requested_project_id = ?")
+    this.db.prepare("UPDATE run_projects SET state = 'running', started_at = ? WHERE run_id = ? AND requested_project_id = ? AND state = 'pending'")
       .run(new Date().toISOString(), runId, projectId);
   }
 
@@ -207,13 +171,13 @@ export class Store {
   // evidence survives and failed only if nothing was observed.
   failProjectKeepingEvidence(runId: number, projectId: number, errorCode: string): void {
     this.db.prepare(`UPDATE run_projects SET state = CASE WHEN evidence_json IS NULL THEN 'failed' ELSE 'partial' END,
-      error_code = ?, finished_at = ? WHERE run_id = ? AND requested_project_id = ?`)
+      error_code = ?, finished_at = ? WHERE run_id = ? AND requested_project_id = ? AND state IN ('pending', 'running')`)
       .run(errorCode, new Date().toISOString(), runId, projectId);
   }
 
   finishProject(runId: number, projectId: number, state: ProjectState, evidence: Evidence | null, errorCode: string | null): void {
     this.db.prepare(`UPDATE run_projects SET state = ?, returned_project_id = ?, evidence_json = ?, error_code = ?, finished_at = ?
-      WHERE run_id = ? AND requested_project_id = ?`).run(
+      WHERE run_id = ? AND requested_project_id = ? AND state IN ('pending', 'running')`).run(
       state, evidence?.project.id ?? null, evidence ? JSON.stringify(evidence) : null,
       errorCode, new Date().toISOString(), runId, projectId,
     );
@@ -225,7 +189,7 @@ export class Store {
       const state: RunState = rows.every((row) => row.state === "complete")
         ? "completed"
         : rows.some((row) => row.state === "complete" || row.state === "partial") ? "partial" : "failed";
-      this.db.prepare("UPDATE runs SET state = ?, finished_at = ? WHERE id = ?")
+      this.db.prepare("UPDATE runs SET state = ?, finished_at = ? WHERE id = ? AND state IN ('queued', 'running')")
         .run(state, new Date().toISOString(), runId);
     });
   }

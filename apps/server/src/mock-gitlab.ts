@@ -31,7 +31,9 @@ export class MockGitLabTransport implements HttpTransport {
       if (phase === 2) return { status: 503, headers: {} };
       return response([{ name: "main", allow_force_push: phase === 3, code_owner_approval_required: false,
         push_access_levels: [{ access_level: 40, access_level_description: "Maintainers" }],
-        merge_access_levels: [{ access_level: 40, access_level_description: "Maintainers" }] }]);
+        merge_access_levels: [{ access_level: 40, access_level_description: "Maintainers" }],
+        // GitLab.com returns this field even when it is empty (the live seed project returns []).
+        unprotect_access_levels: [] }]);
     }
     if (path === "/api/v4/projects/102/protected_branches?per_page=100") return response([]);
     return { status: 404, headers: {} };

@@ -1,6 +1,6 @@
 # Zania GitLab compliance integration: assessment plan
 
-Status: runnable implementation with a verified GitLab test environment. The React UI, Fastify API, SQLite persistence, collector, comparisons, mocked recovery demo, and automated tests are implemented. The candidate reported a successful live UI setting-change comparison; saved Runs 6 and 7 confirm force push false to true while the branch remains protected. Restoration evidence, sanitized screenshots, and the submission repository remain pending.
+Status: implementation and demo artifacts are present. The React UI, Fastify API, SQLite persistence, collector, comparisons, mocked recovery demo, and automated tests are implemented. Live runs 11-13 record the baseline, force-push change, and restoration, with screenshots and video linked in the README. Follow-up fixes address process ownership, terminal outcomes, unknown comparison fields, and persistence-error attribution. Local verification covers 53 server tests, 10 browser tests, and the production build. CI is configured; remote execution of this revision, final sharing with the assessors, and a recorded manual accessibility review remain outstanding.
 
 ## Source and scope
 
@@ -45,9 +45,10 @@ Status: runnable implementation with a verified GitLab test environment. The Rea
 - [x] Test collection, errors, persistence, recovery, and comparisons with mocked GitLab HTTP responses; tests need no credentials or GitLab access.
 - [x] Add automated browser tests for successful collection and partial failure, both exercising the real backend collection logic with mocked GitLab HTTP.
 - [x] Provide a reproducible mocked partial-failure demo, including the recovery action. Do not create real outages or rate-limit traffic.
-- [ ] Use the UI for a live demonstration: collect all three real projects, change one protection setting **manually in GitLab**, collect again, and show the difference. Include sanitized screenshots or a short recording.
-  - Live change exercised successfully on October 22, 2026: complete Run 6 records force push false; complete Run 7 records true. The candidate confirmed the UI comparison worked. This item stays open until sanitized artifacts are saved; a restoration collection is also pending.
-- [ ] Share a runnable repository and README with Node version; exact install, storage setup, run, and test commands; placeholder config; seed instructions; API/permission choices; design and data model; assumptions, limitations, production changes; demos; and AI use plus verification.
+- [x] Use the UI for a live demonstration: collect all three real projects, change one protection setting **manually in GitLab**, collect again, and show the difference. Include screenshots or a short recording.
+  - Existing live runs 11-13 show the baseline, changed force-push setting, and restoration. Screenshots and video are checked into `docs/demo/live/` and linked in the README, which records their sanitization review. Follow-up verification did not re-record the demo or independently repeat that review.
+- [x] Prepare a runnable repository and README with Node version; exact install, storage setup, run, and test commands; placeholder config; seed instructions; API/permission choices; design and data model; assumptions, limitations, production changes; demos; and AI use plus verification.
+- [ ] Share the final reviewed revision with the assessors. The repository has an origin configured; this follow-up does not publish or submit it.
 
 ## Implemented API collection policy
 
@@ -85,7 +86,7 @@ These are our engineering choices, not requirements stated by the assessment. Th
 - **Runtime and tooling:** Node.js 24 LTS, npm workspaces, Vite + React + TypeScript client, and Fastify + TypeScript server. Pin actual dependency versions in a lockfile during scaffolding. The machine's system Node.js 20.11.0 is end-of-life and below current Vite's minimum; a bundled Node.js 24.19.0 runtime is available for implementation. [Node release status](https://nodejs.org/en/about/previous-releases/), [Vite requirements](https://vite.dev/guide/).
 - **Architecture:** one local HTTP server and a server-side run worker in the same process; SQLite via Node 24's built-in `node:sqlite` with explicit migrations. Keep GitLab HTTP access behind an injectable transport so tests and the mocked demo exercise the same collection logic. The built-in API is a release candidate, so pin Node 24 and test storage/restart behavior.
 - **Storage model:** `selection` (saved ordered project IDs); `runs` (requested IDs snapshot, state and times); `run_projects` (one row per requested ID, evidence, state, times and safe error); `source_reads` (per-request/page selected evidence, status and provenance). Transactions protect migration, run creation, and finalization.
-- **Run lifecycle:** queued -> running -> completed/partial/failed/interrupted. Allow one active run for this one-user local server; a second start request should return a clear conflict with the active run ID. On server startup, mark unfinished persisted runs `interrupted` with a timestamp and reason. A new run is the recovery path; historical rows stay immutable.
+- **Run lifecycle:** queued -> running -> completed/partial/failed/interrupted. A second start request returns a conflict with the active run ID. Startup takes an OS-held lock on the data directory before opening or recovering it. A live owner blocks a second server; the lock is released when the owner exits for any reason, so a crash never blocks the next start. Terminal outcomes reject late completion writes. A new run is the recovery path.
 - **Execution:** process projects independently with small bounded concurrency. Apply request timeout and bounded exponential backoff with jitter for network errors, `429`, and transient `5xx`; honor a valid `Retry-After`. Do not retry indefinitely. Treat auth/permission/invalid-ID failures as terminal for that project. Make repeated requests safe by using GitLab `GET` only.
 - **Local API:** read/update saved IDs, start run, get active run, list runs, get run details and comparison. Poll progress from the client; on reload, request active run and current history. No browser request goes directly to GitLab. Implemented routes are listed in `DESIGN.md`.
 - **UI:** one dashboard for saved IDs, run button, live per-project progress and latest outcomes; project detail for current/last-good evidence and sources; history/comparison view showing changed values, baseline, and uncertainty.
@@ -127,11 +128,13 @@ Live demo change: after the first collection, manually toggle **Allowed to force
 3. **Done:** GitLab client and asynchronous collector with per-step provenance, bounded retries, one-active-run enforcement, interruption recovery, and mocked tests.
 4. **Done:** selection, progress, evidence detail, last-good evidence, history, comparisons, and refresh reconnection.
 5. **Done:** Playwright success, partial-failure/recovery, and stale-evidence tests; repeatable isolated mock demo.
-6. **Next:** manual accessibility review, real two-collection UI demo with a manually changed GitLab setting, sanitized screenshots, and submission repository setup.
+6. **Done:** live UI baseline/change/restoration demonstration, saved screenshots and recordings, repository setup, and README delivery details.
+7. **Done locally:** follow-up regression fixes, documentation reconciliation, 53 server tests, 10 browser tests, and production build. CI configuration is present in the working tree.
+8. **Remaining:** recorded manual accessibility review, first remote CI run for this revision, and final sharing with the assessors.
 
 ## Resolved planning choices
 
-- [x] Use `D:/Companies/GitLabComplianceIntegration` for the implementation and submission. A local Git repository is initialized; committing and publishing it are the remaining submission steps.
+- [x] Use `D:/Companies/GitLabComplianceIntegration` for the implementation and submission. The repository has committed history and a GitHub origin; follow-up fixes require final publication/sharing by the candidate.
 - [x] Candidate reports a new personal GitLab.com account and all three synthetic projects. Live GitLab.com API responses verified protected `main` (`protected: true`, rule visible), unprotected `main` (`protected: false`, no protected rules), and an empty repository (`empty_repo: true`, branches `[]`). The empty project's project-level `default_branch` field nevertheless says `main`; treat that as configured metadata, not an existing branch. Follow `GITLAB_SEED_GUIDE.md` for the local read-only verification command. Do **not** send the token in chat.
 - [x] Standardize on Node.js 24 LTS and npm workspaces. Use the available bundled Node 24 runtime for development; document Node 24 installation for reviewers.
 - [x] Use sanitized screenshots for the live two-run demonstration; a recording is optional if screenshots prove the flow clearly.
@@ -139,4 +142,4 @@ Live demo change: after the first collection, manually toggle **Allowed to force
 
 ## Planning integrity
 
-Required items above come from the supplied assessment. Architecture, schema, UI, retry, comparison, staleness, and mock-demo details are engineering choices. The application build and 41 server tests were rechecked after the interrupted session on October 22, 2026. The three seed states were verified through live read-only API responses. The live two-run UI demonstration and its artifacts remain pending.
+Required items above come from the supplied assessment. Architecture, schema, UI, retry, comparison, staleness, and mock-demo details are engineering choices. Current local verification on October 22, 2026 covers 53 server tests, 10 browser tests, and the production build. Existing artifacts document the three live seed states and the UI baseline/change/restoration flow. Follow-up tests use synthetic responses and temporary databases; no live GitLab settings were changed. Manual accessibility verification and remote CI are not claimed complete.

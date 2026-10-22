@@ -13,6 +13,7 @@ const mainRule = (overrides: Partial<RuleFact> = {}): RuleFact => ({
   name: "main", allowForcePush: false, codeOwnerApprovalRequired: false,
   pushAccessLevels: [{ accessLevel: 40, accessLevelDescription: "Maintainers" }],
   mergeAccessLevels: [{ accessLevel: 30, accessLevelDescription: "Developers + Maintainers" }, { userId: 7, accessLevel: 30, accessLevelDescription: "Ada" }],
+  unprotectAccessLevels: [],
   ...overrides,
 });
 
@@ -75,7 +76,17 @@ describe("evidence comparison", () => {
       notCompared: ["code_owner_approval_required (rule main (exact))"],
     });
     const omittedBoth = protectedMain([mainRule({ unprotectAccessLevels: undefined })]);
-    expect(compareEvidence(omittedBoth, omittedBoth)).toEqual({ changes: [], notCompared: [] });
+    expect(compareEvidence(omittedBoth, omittedBoth)).toEqual({ changes: [],
+      notCompared: ["unprotect_access_levels (rule main (exact))"] });
+  });
+
+  it("compares observed empty access lists and false values without treating them as unknown", () => {
+    const before = protectedMain([mainRule()]);
+    const after = protectedMain([mainRule({ pushAccessLevels: [], allowForcePush: true })]);
+    expect(compareEvidence(before, after)).toEqual({ changes: [
+      { field: "allow_force_push", rule: "main (exact)", before: false, after: true },
+      { field: "push_access_levels", rule: "main (exact)", before: ["Maintainers (40)"], after: [] },
+    ], notCompared: [] });
   });
 
   it("compares only observed facts when the current evidence is partial", () => {
