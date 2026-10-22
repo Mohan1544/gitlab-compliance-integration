@@ -4,6 +4,8 @@ A local, read-only tool for a compliance analyst to collect GitLab.com branch-pr
 
 **Status:** implemented and verified. 42 server tests and 4 browser tests pass on Node.js 24.19.0. A live two-collection demonstration against real GitLab.com projects is recorded under [Live demonstration](#live-demonstration-evidence).
 
+▶ **[Watch the demo videos](https://mohan1544.github.io/gitlab-compliance-integration/demo/)** (mocked partial failure and recovery, and the live GitLab.com change), playable in the browser. GitHub's file view downloads `.webm` files rather than playing them, so the videos are served through GitHub Pages.
+
 - [Quick start](#quick-start)
 - [Mocked partial-failure demo](#mocked-partial-failure-demo)
 - [Tests](#tests)
@@ -70,7 +72,7 @@ In a second terminal, run `npm run dev:web` and open http://127.0.0.1:5173. Mock
 
 The scenario repeats every three runs and is keyed to the stored run ID, so a server restart does not reset it. Delete `data/mock-demo` to start again from run 1.
 
-**Recording:** open [docs/demo/index.html](docs/demo/index.html) in a browser to play every demo video on one page, or play [mock-demo.webm](docs/demo/mock/mock-demo.webm) (48 s, captioned) directly. It shows all three runs, including the mid-run refresh. Screenshots:
+**Recording:** [watch it in the browser](https://mohan1544.github.io/gitlab-compliance-integration/demo/) (48 s, captioned), or download [mock-demo.webm](docs/demo/mock/mock-demo.webm). Locally, [docs/demo/index.html](docs/demo/index.html) plays every demo video on one page. It shows all three runs, including the mid-run refresh. Screenshots:
 
 | Step | Screenshot |
 | --- | --- |
@@ -111,7 +113,7 @@ The interrupted-run evidence test was checked by temporarily removing the code i
 
 ## Live demonstration evidence
 
-Recorded through the UI against the three seed projects on GitLab.com on 22 October 2026. Between collections, **Allowed to force push** on the protected project's `main` branch was changed manually in GitLab; the application itself only reads. No token or credentials appear in any recording or screenshot; project names and IDs are the synthetic seed projects. **Video:** [live-demo.webm](docs/demo/live/live-demo.webm) (1 min 14 s) shows all three collections in order, with a title card before each; [docs/demo/index.html](docs/demo/index.html) plays it in a browser.
+Recorded through the UI against the three seed projects on GitLab.com on 22 October 2026. Between collections, **Allowed to force push** on the protected project's `main` branch was changed manually in GitLab; the application itself only reads. No token or credentials appear in any recording or screenshot; project names and IDs are the synthetic seed projects. **Video:** [watch it in the browser](https://mohan1544.github.io/gitlab-compliance-integration/demo/) (1 min 14 s), or download [live-demo.webm](docs/demo/live/live-demo.webm). It shows all three collections in order, with a title card before each.
 
 | Run | GitLab state | Result | Screenshots |
 | --- | --- | --- | --- |
