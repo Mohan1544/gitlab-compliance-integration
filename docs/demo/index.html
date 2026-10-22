@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GitLab Evidence demos</title>
+  <style>
+    :root { color-scheme: light dark; --bg: #f3f6fa; --panel: #fff; --text: #18243b; --muted: #5d6d88; --border: #dae2ed; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #0f1724; --panel: #172133; --text: #e6ecf5; --muted: #9aa8bf; --border: #2a3850; } }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { max-width: 1120px; margin: auto; padding: 24px 16px 48px; }
+    h1 { font-size: 28px; margin: 0 0 4px; }
+    h2 { font-size: 20px; margin: 32px 0 8px; }
+    p { color: var(--muted); margin: 0 0 12px; }
+    figure { margin: 0 0 20px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+    figcaption { font-weight: 600; margin-bottom: 10px; }
+    video { width: 100%; height: auto; border-radius: 8px; background: #000; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>GitLab Evidence: demo recordings</h1>
+  <p>Recorded on 22 October 2026. No token or credentials appear in any recording.</p>
+
+  <h2>Mocked partial failure and recovery</h2>
+  <p>GitLab responses are mocked; the real backend collector and database run.</p>
+  <figure>
+    <figcaption>Runs 1–3: success with a mid-run refresh, partial failure (503), recovery compared with run 1</figcaption>
+    <video controls preload="metadata" src="mock/mock-demo.webm"></video>
+  </figure>
+
+  <h2>Live GitLab.com data</h2>
+  <p>“Allowed to force push” on the protected project's main branch was changed manually in GitLab between collections. The app only reads.</p>
+  <figure>
+    <figcaption>Runs 11–13: baseline with force push off; turned on (No → Yes against run 11); restored (Yes → No against run 12)</figcaption>
+    <video controls preload="metadata" src="live/live-demo.webm"></video>
+  </figure>
+</main>
+</body>
+</html>
