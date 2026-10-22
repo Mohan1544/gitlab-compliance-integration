@@ -1,6 +1,6 @@
 # Technical design: GitLab evidence collector
 
-**Status:** implemented and verified locally with 53 server tests, 10 browser tests, and a production build. The live baseline, force-push change, and restored setting are recorded as runs 11-13 with screenshots and a video linked in [README.md](README.md#live-demonstration-evidence). The local mock demo records failure and recovery. CI configuration is present; a remote run of this revision and the manual accessibility review remain outstanding. This design fits the assessment's one-user local scope.
+**Status:** implemented and verified locally with 53 server tests, 10 browser tests, and a production build. The live baseline, force-push change, and restored setting are recorded as runs 11-13 with screenshots and a video linked in [README.md](README.md#live-demonstration-evidence). The local mock demo records failure and recovery. CI runs on every push and has passed on GitHub Actions; the manual accessibility review remains outstanding. This design fits the assessment's one-user local scope.
 
 ## The design problem
 
@@ -132,7 +132,7 @@ The recorded live demo manually toggled **Allowed to force push** on the synthet
 
 The repeatable mocked failure demo makes one protected-rules read return a transient error beyond the retry budget, shows partial evidence and the recovery action, then succeeds on a subsequent run. Its mode is explicit and ignores the live token. [MANUAL_TESTING.md](MANUAL_TESTING.md) maps recorded scenarios and additional review regressions to tests without claiming the old recording covers newly added cases.
 
-The implementation, failure demo, browser tests, live artifacts, and setup documentation are present. The [CI workflow](.github/workflows/ci.yml) installs locked dependencies and Chromium on Windows, then runs server tests and the build/browser suite using the pinned Node version. Local verification has passed; remote CI execution awaits publication of this revision. The manual accessibility review is not yet recorded.
+The implementation, failure demo, browser tests, live artifacts, and setup documentation are present. The [CI workflow](.github/workflows/ci.yml) installs locked dependencies and Chromium on Windows, then runs server tests and the build/browser suite using the pinned Node version. Local verification has passed, and the workflow has passed on GitHub Actions from a clean checkout. The manual accessibility review is not yet recorded.
 
 ## Main risks and limits
 

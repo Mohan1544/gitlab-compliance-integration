@@ -2,7 +2,7 @@
 
 A local, read-only tool for a compliance analyst to collect GitLab.com branch-protection evidence, investigate collection failures, and understand how a project's protection posture changes between collections.
 
-**Status:** implemented and verified locally. 53 server tests and 10 browser tests pass on Node.js 24.19.0. A live demonstration against real GitLab.com projects, including restoration of the changed setting, is recorded under [Live demonstration](#live-demonstration-evidence). The [CI workflow](.github/workflows/ci.yml) checks a clean install, server tests, build, and browser tests on Windows; its first remote run is pending publication of this revision.
+**Status:** implemented and verified locally. 53 server tests and 10 browser tests pass on Node.js 24.19.0. A live demonstration against real GitLab.com projects, including restoration of the changed setting, is recorded under [Live demonstration](#live-demonstration-evidence). The [CI workflow](.github/workflows/ci.yml) checks a clean install, server tests, build, and browser tests on Windows on every push; it [passed on GitHub Actions](https://github.com/Mohan1544/gitlab-compliance-integration/actions/workflows/ci.yml) (53 server tests, 10 browser tests on Playwright's bundled Chromium).
 
 ▶ **[Watch the demo videos](https://mohan1544.github.io/gitlab-compliance-integration/demo/)** (mocked partial failure and recovery, and the live GitLab.com change), playable in the browser. GitHub's file view downloads `.webm` files rather than playing them, so the videos are served through GitHub Pages.
 

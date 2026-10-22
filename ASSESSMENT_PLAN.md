@@ -1,6 +1,6 @@
 # Zania GitLab compliance integration: assessment plan
 
-Status: implementation and demo artifacts are present. The React UI, Fastify API, SQLite persistence, collector, comparisons, mocked recovery demo, and automated tests are implemented. Live runs 11-13 record the baseline, force-push change, and restoration, with screenshots and video linked in the README. Follow-up fixes address process ownership, terminal outcomes, unknown comparison fields, and persistence-error attribution. Local verification covers 53 server tests, 10 browser tests, and the production build. CI is configured; remote execution of this revision, final sharing with the assessors, and a recorded manual accessibility review remain outstanding.
+Status: implementation and demo artifacts are present. The React UI, Fastify API, SQLite persistence, collector, comparisons, mocked recovery demo, and automated tests are implemented. Live runs 11-13 record the baseline, force-push change, and restoration, with screenshots and video linked in the README. Follow-up fixes address process ownership, terminal outcomes, unknown comparison fields, and persistence-error attribution. Local verification covers 53 server tests, 10 browser tests, and the production build. CI runs on every push and has passed on GitHub Actions; final sharing with the assessors and a recorded manual accessibility review remain outstanding.
 
 ## Source and scope
 
@@ -130,7 +130,7 @@ Live demo change: after the first collection, manually toggle **Allowed to force
 5. **Done:** Playwright success, partial-failure/recovery, and stale-evidence tests; repeatable isolated mock demo.
 6. **Done:** live UI baseline/change/restoration demonstration, saved screenshots and recordings, repository setup, and README delivery details.
 7. **Done locally:** follow-up regression fixes, documentation reconciliation, 53 server tests, 10 browser tests, and production build. CI configuration is present in the working tree.
-8. **Remaining:** recorded manual accessibility review, first remote CI run for this revision, and final sharing with the assessors.
+8. **Remaining:** recorded manual accessibility review and final sharing with the assessors. (CI has passed on GitHub Actions.)
 
 ## Resolved planning choices
 
@@ -142,4 +142,4 @@ Live demo change: after the first collection, manually toggle **Allowed to force
 
 ## Planning integrity
 
-Required items above come from the supplied assessment. Architecture, schema, UI, retry, comparison, staleness, and mock-demo details are engineering choices. Current local verification on October 22, 2026 covers 53 server tests, 10 browser tests, and the production build. Existing artifacts document the three live seed states and the UI baseline/change/restoration flow. Follow-up tests use synthetic responses and temporary databases; no live GitLab settings were changed. Manual accessibility verification and remote CI are not claimed complete.
+Required items above come from the supplied assessment. Architecture, schema, UI, retry, comparison, staleness, and mock-demo details are engineering choices. Current local verification on October 22, 2026 covers 53 server tests, 10 browser tests, and the production build. Existing artifacts document the three live seed states and the UI baseline/change/restoration flow. Follow-up tests use synthetic responses and temporary databases; no live GitLab settings were changed. CI has passed on GitHub Actions; manual accessibility verification is not claimed complete.
